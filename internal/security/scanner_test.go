@@ -27,6 +27,9 @@ func TestScan_BlockedByFilename_DotEnv(t *testing.T) {
 	if !result.Blocked {
 		t.Error("expected Blocked=true for .env file")
 	}
+	if result.Reason != "FILENAME_BLACKLISTED" {
+		t.Errorf("expected FILENAME_BLACKLISTED reason, got %q", result.Reason)
+	}
 }
 
 func TestScan_BlockedByFilename_Pem(t *testing.T) {
@@ -35,6 +38,9 @@ func TestScan_BlockedByFilename_Pem(t *testing.T) {
 	result := security.Scan(path)
 	if !result.Blocked {
 		t.Error("expected Blocked=true for .pem file")
+	}
+	if result.Reason != "EXTENSION_BLOCKED" {
+		t.Errorf("expected EXTENSION_BLOCKED reason, got %q", result.Reason)
 	}
 }
 
@@ -45,6 +51,9 @@ func TestScan_BlockedByFilename_IdRsa(t *testing.T) {
 	if !result.Blocked {
 		t.Error("expected Blocked=true for id_rsa file")
 	}
+	if result.Reason != "FILENAME_BLACKLISTED" {
+		t.Errorf("expected FILENAME_BLACKLISTED reason, got %q", result.Reason)
+	}
 }
 
 func TestScan_BlockedByFilename_Credentials(t *testing.T) {
@@ -53,6 +62,9 @@ func TestScan_BlockedByFilename_Credentials(t *testing.T) {
 	result := security.Scan(path)
 	if !result.Blocked {
 		t.Error("expected Blocked=true for credentials.json")
+	}
+	if result.Reason != "FILENAME_BLACKLISTED" {
+		t.Errorf("expected FILENAME_BLACKLISTED reason, got %q", result.Reason)
 	}
 }
 

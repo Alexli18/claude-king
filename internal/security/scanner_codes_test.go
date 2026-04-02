@@ -1,11 +1,13 @@
 // internal/security/scanner_codes_test.go
-package security
+package security_test
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexli18/claude-king/internal/security"
 )
 
 func TestScan_ErrorCodes_Structured(t *testing.T) {
@@ -20,7 +22,7 @@ func TestScan_ErrorCodes_Structured(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := Scan(envFile)
+	result := security.Scan(envFile)
 	if !result.Blocked {
 		t.Fatal("expected .env to be blocked")
 	}

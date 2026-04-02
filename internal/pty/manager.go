@@ -103,11 +103,24 @@ func (m *Manager) CreateSession(id, name, command, cwd string, env map[string]st
 
 // monitorSession waits for a session to exit and updates the store status.
 func (m *Manager) monitorSession(s *Session) {
+	startedAt := time.Now()
 	_ = s.Wait()
+	duration := time.Since(startedAt)
 
 	s.mu.RLock()
 	status := s.Status
+	cmd := s.cmd
 	s.mu.RUnlock()
+
+	// Extract the integer exit code from the process state.
+	exitCode := 0
+	if cmd != nil && cmd.ProcessState != nil {
+		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+			exitCode = ws.ExitStatus()
+		} else {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+	}
 
 	if err := m.store.UpdateVassalStatus(s.ID, status); err != nil {
 		m.logger.Error("failed to update vassal status",
@@ -117,10 +130,18 @@ func (m *Manager) monitorSession(s *Session) {
 	}
 	_ = m.store.UpdateVassalPID(s.ID, 0)
 
-	m.logger.Info("session exited",
-		slog.String("name", s.Name),
-		slog.String("status", status),
-	)
+	if exitCode != 0 {
+		m.logger.Warn("VASSAL_FAILED",
+			"name", s.Name,
+			"exit", exitCode,
+			"duration", duration.String(),
+		)
+	} else {
+		m.logger.Info("session exited",
+			slog.String("name", s.Name),
+			slog.String("status", status),
+		)
+	}
 }
 
 // GetSession returns a session by name.
