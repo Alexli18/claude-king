@@ -281,7 +281,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 
 	// Create artifact ledger and MCP server.
-	ledger := artifacts.NewLedger(d.store, d.kingdom.ID)
+	ledger := artifacts.NewLedgerWithSettings(d.store, d.kingdom.ID, d.config.Settings)
 	adapter := &ptyManagerAdapter{mgr: d.ptyMgr}
 	d.mcpSrv = mcp.NewServer(adapter, d.store, ledger, d.kingdom.ID, d.rootDir, d.logger.With("component", "mcp"))
 
@@ -432,7 +432,7 @@ func (d *Daemon) startVassals() error {
 			}
 			manifestPath := filepath.Join(repoPath, "vassal.json")
 			if manifest, err := config.LoadVassalManifest(manifestPath); err == nil {
-				ledger := artifacts.NewLedger(d.store, d.kingdom.ID)
+				ledger := artifacts.NewLedgerWithSettings(d.store, d.kingdom.ID, d.config.Settings)
 				for _, art := range manifest.Artifacts {
 					artPath := filepath.Join(repoPath, art.Path)
 					if _, regErr := ledger.Register(art.Name, artPath, id, art.MimeType); regErr != nil {
