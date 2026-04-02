@@ -159,6 +159,7 @@ func (s *Server) RegisterTools() {
 	s.registerDispatchTask()
 	s.registerGetTaskStatus()
 	s.registerAbortTask()
+	s.registerGetSerialEvents()
 }
 
 // registerListVassals registers the list_vassals tool.
@@ -360,4 +361,22 @@ func (s *Server) registerAbortTask() {
 		),
 	)
 	s.mcpServer.AddTool(tool, s.handleAbortTask)
+}
+
+// registerGetSerialEvents registers the get_serial_events tool.
+func (s *Server) registerGetSerialEvents() {
+	tool := mcp.NewTool("get_serial_events",
+		mcp.WithDescription("Get recent events from a serial vassal, filtered by time window and severity"),
+		mcp.WithString("vassal",
+			mcp.Required(),
+			mcp.Description("Vassal name (must have type: serial)"),
+		),
+		mcp.WithString("since",
+			mcp.Description("Duration window: '5m', '1h', '30s'. Default: '1h'"),
+		),
+		mcp.WithString("severity",
+			mcp.Description("Filter: 'warning', 'error', 'critical', or '' for all"),
+		),
+	)
+	s.mcpServer.AddTool(tool, s.handleGetSerialEvents)
 }

@@ -603,6 +603,80 @@ func (s *Server) handleAbortTask(ctx context.Context, request mcp.CallToolReques
 	return mcp.NewToolResultText(result), nil
 }
 
+// ParseSinceDuration converts a user-supplied string like "5m", "1h", "30s"
+// to a time.Duration.
+func ParseSinceDuration(s string) (time.Duration, error) {
+	return time.ParseDuration(s)
+}
+
+// FilterEventsBySeverity returns events matching the given severity.
+// Empty severity returns all events.
+func FilterEventsBySeverity(events []store.Event, severity string) []store.Event {
+	if severity == "" {
+		return events
+	}
+	out := make([]store.Event, 0)
+	for _, e := range events {
+		if e.Severity == severity {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// handleGetSerialEvents retrieves recent events from a serial vassal, filtered
+// by a time window ("since") and an optional severity filter.
+func (s *Server) handleGetSerialEvents(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.logger.Debug("handling get_serial_events call")
+
+	vassalName := request.GetString("vassal", "")
+	sinceStr := request.GetString("since", "")
+	severity := request.GetString("severity", "")
+
+	if vassalName == "" {
+		return mcp.NewToolResultError("vassal is required"), nil
+	}
+	if sinceStr == "" {
+		sinceStr = "1h"
+	}
+
+	dur, err := ParseSinceDuration(sinceStr)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid since value %q: %v", sinceStr, err)), nil
+	}
+
+	after := time.Now().Add(-dur)
+
+	// Fetch all events for the kingdom (no severity/source filter at DB layer so
+	// we can apply the time window in-memory alongside the source filter).
+	all, err := s.store.ListEvents(s.kingdomID, "", "", 0)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("store error: %v", err)), nil
+	}
+
+	var filtered []store.Event
+	for _, e := range all {
+		t, parseErr := time.Parse(time.RFC3339, e.CreatedAt)
+		if parseErr != nil {
+			// Fall back to SQLite datetime format.
+			t, parseErr = time.Parse("2006-01-02 15:04:05", e.CreatedAt)
+			if parseErr != nil {
+				continue
+			}
+		}
+		if e.SourceID == vassalName && t.After(after) {
+			filtered = append(filtered, e)
+		}
+	}
+	filtered = FilterEventsBySeverity(filtered, severity)
+
+	out, err := json.Marshal(filtered)
+	if err != nil {
+		return mcp.NewToolResultError("json marshal error"), nil
+	}
+	return mcp.NewToolResultText(string(out)), nil
+}
+
 // isPathAllowed checks whether the given absolute path is within the kingdom
 // root directory.
 func isPathAllowed(absPath, rootDir string) bool {
