@@ -18,9 +18,9 @@ type VassalConfig struct {
 	Env           map[string]string `yaml:"env,omitempty"`
 	Autostart     *bool             `yaml:"autostart,omitempty"`
 	RestartPolicy string            `yaml:"restart_policy,omitempty"`
-	Type          string            `yaml:"type"`     // "shell" (default) | "claude"
-	Host          string            `yaml:"host"`     // SSH host for remote vassals (future use)
-	SSHUser       string            `yaml:"ssh_user"` // SSH user (future use)
+	Type          string            `yaml:"type,omitempty"`     // "shell" (default) | "claude"
+	Host          string            `yaml:"host,omitempty"`     // SSH host for remote vassals (future use)
+	SSHUser       string            `yaml:"ssh_user,omitempty"` // SSH user (future use)
 }
 
 // AutostartOrDefault returns the autostart value, defaulting to true if not set.
@@ -32,11 +32,11 @@ func (v VassalConfig) AutostartOrDefault() bool {
 }
 
 // TypeOrDefault returns "shell" if Type is empty.
-func (vc *VassalConfig) TypeOrDefault() string {
-	if vc.Type == "" {
+func (v VassalConfig) TypeOrDefault() string {
+	if v.Type == "" {
 		return "shell"
 	}
-	return vc.Type
+	return v.Type
 }
 
 // PatternConfig represents an event detection pattern
