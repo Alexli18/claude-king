@@ -414,6 +414,8 @@ func (d *Daemon) startVassals() error {
 				}
 				d.logger.Info("VMP manifest loaded", "vassal", vc.Name, "skills", len(manifest.Skills), "artifacts", len(manifest.Artifacts))
 			}
+			// Auto-Integrity: inject contracts based on project type.
+			d.injectAutoContracts(repoPath)
 		}
 
 		d.logger.Info("vassal started", "name", vc.Name)
@@ -431,6 +433,15 @@ func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
 
 	kingDir := filepath.Join(d.rootDir, kingDirName)
 	sockPath := filepath.Join(kingDir, "vassals", v.Name+".sock")
+
+	// Auto-Integrity: inject contracts based on project type.
+	if v.RepoPath != "" {
+		repoPath := v.RepoPath
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(d.rootDir, repoPath)
+		}
+		d.injectAutoContracts(repoPath)
+	}
 
 	cmd := exec.Command(exe,
 		"--name", v.Name,
