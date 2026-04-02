@@ -345,9 +345,13 @@ func (d *Daemon) auditCleanupLoop() {
 	}
 }
 
-// startVassals creates PTY sessions for all autostart vassals in config (T014).
+// startVassals creates PTY sessions for all autostart shell-type vassals in config (T014).
+// Claude-type vassals are managed separately by startClaudeVassal.
 func (d *Daemon) startVassals() error {
 	for _, vc := range d.config.Vassals {
+		if vc.TypeOrDefault() == "claude" {
+			continue // managed by startClaudeVassal
+		}
 		if !vc.AutostartOrDefault() {
 			d.logger.Info("skipping non-autostart vassal", "name", vc.Name)
 			continue
