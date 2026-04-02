@@ -523,12 +523,6 @@ func IsRunning(rootDir string) (bool, error) {
 	return true, nil
 }
 
-// SocketPath returns the socket path for a given root directory.
-// Exported so that the client can find the correct socket.
-func SocketPath(rootDir string) string {
-	return SocketPathForRoot(rootDir)
-}
-
 // ---------------------------------------------------------------------------
 // UDS accept loop & connection handling
 // ---------------------------------------------------------------------------

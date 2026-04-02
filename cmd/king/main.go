@@ -118,7 +118,8 @@ func cmdUpDetach() {
 		os.Exit(1)
 	}
 
-	// Check if already running.
+	// Pre-check for UX only: avoids spawning a child that will immediately
+	// fail. Not a hard guard — the daemon's own Start() re-checks internally.
 	running, err := daemon.IsRunning(rootDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -145,6 +146,7 @@ func cmdUpDetach() {
 	// Re-exec self with --daemon flag, detached from terminal.
 	exe, err := os.Executable()
 	if err != nil {
+		logFile.Close()
 		fmt.Fprintf(os.Stderr, "error resolving executable: %v\n", err)
 		os.Exit(1)
 	}
@@ -162,20 +164,27 @@ func cmdUpDetach() {
 	}
 	logFile.Close()
 
+	// Release parent's reference to the child process so it doesn't become a
+	// zombie if the poll loop times out. The daemon is now fully detached.
+	if err := cmd.Process.Release(); err != nil {
+		// Non-fatal: log but continue — the daemon is running.
+		fmt.Fprintf(os.Stderr, "warning: could not release daemon process: %v\n", err)
+	}
+
 	pid := cmd.Process.Pid
 
 	// Poll for socket file — daemon signals readiness by creating it.
 	sockPath := daemon.SocketPathForRoot(rootDir)
 	for i := 0; i < 20; i++ {
-		time.Sleep(50 * time.Millisecond)
 		if _, err := os.Stat(sockPath); err == nil {
 			fmt.Printf("Kingdom started (pid: %d)\n", pid)
 			fmt.Printf("Logs: %s\n", logPath)
 			return
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	fmt.Fprintf(os.Stderr, "error: daemon did not start within 1s (check %s)\n", logPath)
+	fmt.Fprintf(os.Stderr, "error: daemon (pid: %d) did not start within 1s (check %s)\n", pid, logPath)
 	os.Exit(1)
 }
 
