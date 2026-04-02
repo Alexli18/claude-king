@@ -39,7 +39,7 @@ type Task struct {
 // NewTask creates a new Task with a generated ID and accepted status.
 func NewTask(vassalName, taskDesc string, context map[string]any) *Task {
 	return &Task{
-		ID:         "t-" + uuid.New().String()[:8],
+		ID:         "t-" + uuid.New().String(),
 		VassalName: vassalName,
 		Task:       taskDesc,
 		Context:    context,
@@ -55,6 +55,7 @@ func taskPath(kingDir, taskID string) string {
 }
 
 // SaveTask writes a Task to .king/tasks/<id>.json.
+// It updates t.UpdatedAt to the current time before writing.
 func SaveTask(kingDir string, t *Task) error {
 	dir := filepath.Join(kingDir, "tasks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -65,7 +66,15 @@ func SaveTask(kingDir string, t *Task) error {
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
 	}
-	return os.WriteFile(taskPath(kingDir, t.ID), data, 0o644)
+	tmp := taskPath(kingDir, t.ID) + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write task tmp: %w", err)
+	}
+	if err := os.Rename(tmp, taskPath(kingDir, t.ID)); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename task file: %w", err)
+	}
+	return nil
 }
 
 // LoadTask reads a Task from .king/tasks/<id>.json.

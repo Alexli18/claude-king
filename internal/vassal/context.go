@@ -16,6 +16,9 @@ type ArtifactRef struct {
 // WriteVassalMD generates VASSAL.md in repoPath with task context.
 // Claude Code reads this file to understand its role and assigned task.
 func WriteVassalMD(repoPath, vassalName string, t *Task, artifacts []ArtifactRef) error {
+	if t == nil {
+		return fmt.Errorf("WriteVassalMD: task must not be nil")
+	}
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# You are a Vassal: %s\n\n", vassalName))
@@ -40,5 +43,8 @@ func WriteVassalMD(repoPath, vassalName string, t *Task, artifacts []ArtifactRef
 	sb.WriteString(fmt.Sprintf("Run: `kingctl report-done --task %s`\n", t.ID))
 	sb.WriteString("(This signals King that the task is complete.)\n")
 
-	return os.WriteFile(filepath.Join(repoPath, "VASSAL.md"), []byte(sb.String()), 0o644)
+	if err := os.WriteFile(filepath.Join(repoPath, "VASSAL.md"), []byte(sb.String()), 0o644); err != nil {
+		return fmt.Errorf("write VASSAL.md to %s: %w", repoPath, err)
+	}
+	return nil
 }
