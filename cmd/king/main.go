@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alexli18/claude-king/internal/daemon"
+	"github.com/alexli18/claude-king/internal/registry"
 	"github.com/alexli18/claude-king/internal/tui"
 )
 
@@ -44,6 +45,18 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  down    Stop the Kingdom daemon")
 	fmt.Fprintln(os.Stderr, "  mcp     Start MCP server on stdio (for Claude Code)")
 	fmt.Fprintln(os.Stderr, "  dashboard  Open the TUI dashboard")
+}
+
+// registryPath returns the path to the global King P2P registry file.
+// Creates the ~/.king directory if it does not exist.
+func registryPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	dir := filepath.Join(home, ".king")
+	_ = os.MkdirAll(dir, 0700)
+	return filepath.Join(dir, "registry.json")
 }
 
 func cmdUp() {
@@ -181,6 +194,12 @@ func cmdUpDetach() {
 	sockPath := daemon.SocketPathForRoot(rootDir)
 	for i := 0; i < 20; i++ {
 		if _, err := os.Stat(sockPath); err == nil {
+			reg := registry.NewRegistry(registryPath())
+			_ = reg.Register(rootDir, registry.Entry{
+				Socket: sockPath,
+				PID:    pid,
+				Name:   filepath.Base(rootDir),
+			})
 			fmt.Printf("Kingdom started (pid: %d)\n", pid)
 			fmt.Printf("Logs: %s\n", logPath)
 			return
@@ -224,6 +243,9 @@ func cmdDown() {
 		os.Exit(1)
 	}
 	fmt.Println("Shutdown signal sent.")
+
+	reg := registry.NewRegistry(registryPath())
+	_ = reg.Unregister(rootDir)
 }
 
 func cmdMCP() {
