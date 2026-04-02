@@ -14,6 +14,9 @@ const (
 	ProjectTypeNode     ProjectType = "node"
 	ProjectTypeHardware ProjectType = "hardware"
 	ProjectTypeUnknown  ProjectType = "unknown"
+	ProjectTypeESP32    ProjectType = "esp32"
+	ProjectTypeNMEA     ProjectType = "nmea"
+	ProjectTypeAT       ProjectType = "at"
 )
 
 // Fingerprint detects the project type by inspecting rootDir.

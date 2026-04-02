@@ -64,3 +64,28 @@ func TestFingerprint_Unknown(t *testing.T) {
 		t.Errorf("got %q, want %q", got, fingerprint.ProjectTypeUnknown)
 	}
 }
+
+func TestProjectType_SerialConstants(t *testing.T) {
+	if fingerprint.ProjectTypeESP32 == "" {
+		t.Fatal("ProjectTypeESP32 must not be empty")
+	}
+	if fingerprint.ProjectTypeNMEA == "" {
+		t.Fatal("ProjectTypeNMEA must not be empty")
+	}
+	if fingerprint.ProjectTypeAT == "" {
+		t.Fatal("ProjectTypeAT must not be empty")
+	}
+	// Verify distinct values
+	constants := []fingerprint.ProjectType{
+		fingerprint.ProjectTypeESP32,
+		fingerprint.ProjectTypeNMEA,
+		fingerprint.ProjectTypeAT,
+	}
+	seen := make(map[fingerprint.ProjectType]bool)
+	for _, c := range constants {
+		if seen[c] {
+			t.Errorf("duplicate ProjectType constant value: %q", c)
+		}
+		seen[c] = true
+	}
+}
