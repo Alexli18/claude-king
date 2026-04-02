@@ -56,6 +56,9 @@ func cmdUp() {
 			detach = true
 		case "--daemon":
 			daemonMode = true
+		default:
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", arg)
+			os.Exit(1)
 		}
 	}
 
@@ -85,13 +88,12 @@ func cmdUp() {
 	}
 
 	if daemonMode {
-		// Daemon mode: block until context is cancelled.
+		// Daemon mode: block until the daemon's internal context is cancelled.
 		// When "king down" sends the shutdown RPC, the daemon's "shutdown"
-		// handler calls d.cancel() (see daemon.go registerRealHandlers /
-		// registerStubHandlers). That cancel func is the same one bound to
-		// ctx here, so <-ctx.Done() unblocks and the defer cancel() / Stop()
-		// sequence below runs correctly.
-		<-ctx.Done()
+		// handler calls d.cancel() which closes d.ctx (a child of ctx).
+		// We must wait on d.Done() (d.ctx.Done()) — NOT the parent ctx —
+		// because d.cancel() only cancels the child context.
+		<-d.Done()
 	} else {
 		fmt.Println("Kingdom is running. Press Ctrl+C to stop.")
 		sigCh := make(chan os.Signal, 1)
@@ -100,6 +102,8 @@ func cmdUp() {
 		select {
 		case <-sigCh:
 			fmt.Println("\nShutting down...")
+		case <-d.Done():
+			// Daemon was shut down remotely via king down.
 		case <-ctx.Done():
 		}
 	}
