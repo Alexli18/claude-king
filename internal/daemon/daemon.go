@@ -30,10 +30,9 @@ import (
 )
 
 const (
-	kingDirName  = ".king"
-	pidFileName  = "king.pid"  // legacy, kept for reference
-	sockFileName = "king.sock" // legacy, kept for reference
-	dbFileName   = "king.db"
+	kingDirName = ".king"
+	// Legacy fixed filenames (pre-hash scheme): king.pid, king.sock
+	dbFileName = "king.db"
 )
 
 // SocketPathForRoot returns a unique socket path based on the root directory hash.
@@ -346,7 +345,7 @@ func (d *Daemon) auditCleanupLoop() {
 	}
 }
 
-/// mergePatterns appends newPatterns to existing, skipping any with duplicate Name.
+// mergePatterns appends newPatterns to existing, skipping any with duplicate Name.
 func mergePatterns(existing, newPatterns []config.PatternConfig) []config.PatternConfig {
 	seen := make(map[string]bool)
 	for _, p := range existing {
