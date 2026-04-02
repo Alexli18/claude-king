@@ -100,6 +100,17 @@ func cmdUp() {
 		os.Exit(1)
 	}
 
+	reg := registry.NewRegistry(registryPath())
+	sockPath := daemon.SocketPathForRoot(rootDir)
+	_ = reg.Register(rootDir, registry.Entry{
+		Socket: sockPath,
+		PID:    os.Getpid(), // foreground: daemon IS this process
+		Name:   filepath.Base(rootDir),
+	})
+	defer func() {
+		_ = reg.Unregister(rootDir)
+	}()
+
 	if daemonMode {
 		// Daemon mode: block until the daemon's internal context is cancelled.
 		// When "king down" sends the shutdown RPC, the daemon's "shutdown"
@@ -243,6 +254,16 @@ func cmdDown() {
 		os.Exit(1)
 	}
 	fmt.Println("Shutdown signal sent.")
+
+	// Wait for daemon to fully stop (socket disappears)
+	sockPath := daemon.SocketPathForRoot(rootDir)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	reg := registry.NewRegistry(registryPath())
 	_ = reg.Unregister(rootDir)
