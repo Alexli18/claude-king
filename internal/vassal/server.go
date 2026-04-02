@@ -58,24 +58,29 @@ func (s *VassalServer) Start(ctx context.Context) (string, error) {
 	}
 
 	go func() {
-		defer ln.Close()
-		// Close the listener when context is cancelled so Accept unblocks.
-		go func() {
-			<-ctx.Done()
+		defer func() {
 			ln.Close()
+			_ = os.Remove(sockPath) // Fix 4: clean up socket on exit
 		}()
-
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				if ctx.Err() != nil {
-					return
+					return // context cancelled, clean exit
 				}
 				s.logger.Error("accept error", "err", err)
 				return
 			}
-			go s.serveConn(ctx, conn)
+			// Serve one connection at a time (StdioServer is single-connection).
+			s.serveConn(ctx, conn)
+			// After connection closes, loop back and accept the next one.
 		}
+	}()
+
+	// Cancel listener on context done (separate goroutine, no double-close issue).
+	go func() {
+		<-ctx.Done()
+		ln.Close()
 	}()
 
 	return sockPath, nil
@@ -130,21 +135,28 @@ func (s *VassalServer) handleDispatchTask(_ context.Context, req mcp.CallToolReq
 		s.mu.Unlock()
 		return mcp.NewToolResultError(fmt.Sprintf("vassal busy with task %s (status: %s)", s.activeTask.ID, s.activeTask.Status)), nil
 	}
-
-	t := NewTask(s.name, taskDesc, ctx)
-	s.activeTask = t
 	s.mu.Unlock()
 
+	// Create and save task BEFORE setting activeTask.
+	t := NewTask(s.name, taskDesc, ctx)
 	if err := SaveTask(s.kingDir, t); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("save task: %v", err)), nil
 	}
 
+	// Only set activeTask after successful save.
+	s.mu.Lock()
+	s.activeTask = t
+	s.mu.Unlock()
+
 	go s.runTask(t)
 
-	result, _ := json.Marshal(map[string]string{
+	result, err := json.Marshal(map[string]string{
 		"task_id": t.ID,
 		"status":  string(t.Status),
 	})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
+	}
 	return mcp.NewToolResultText(string(result)), nil
 }
 
@@ -159,7 +171,7 @@ func (s *VassalServer) handleGetTaskStatus(_ context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError(fmt.Sprintf("task not found: %v", err)), nil
 	}
 
-	result, _ := json.Marshal(map[string]any{
+	result, err := json.Marshal(map[string]any{
 		"task_id":    t.ID,
 		"status":     t.Status,
 		"output":     t.Output,
@@ -168,6 +180,9 @@ func (s *VassalServer) handleGetTaskStatus(_ context.Context, req mcp.CallToolRe
 		"created_at": t.CreatedAt.Format(time.RFC3339),
 		"updated_at": t.UpdatedAt.Format(time.RFC3339),
 	})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
+	}
 	return mcp.NewToolResultText(string(result)), nil
 }
 
@@ -183,7 +198,10 @@ func (s *VassalServer) handleAbortTask(_ context.Context, req mcp.CallToolReques
 	}
 
 	if t.Status != TaskStatusAccepted && t.Status != TaskStatusRunning {
-		result, _ := json.Marshal(map[string]string{"status": string(t.Status), "message": "task already finished"})
+		result, err := json.Marshal(map[string]string{"status": string(t.Status), "message": "task already finished"})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
+		}
 		return mcp.NewToolResultText(string(result)), nil
 	}
 
@@ -196,7 +214,10 @@ func (s *VassalServer) handleAbortTask(_ context.Context, req mcp.CallToolReques
 	}
 	s.mu.Unlock()
 
-	result, _ := json.Marshal(map[string]string{"task_id": taskID, "status": "aborted"})
+	result, err := json.Marshal(map[string]string{"task_id": taskID, "status": "aborted"})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
+	}
 	return mcp.NewToolResultText(string(result)), nil
 }
 

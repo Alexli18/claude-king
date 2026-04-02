@@ -46,6 +46,7 @@ func main() {
 	select {
 	case <-sigCh:
 		logger.Info("shutting down")
+		cancel()
 	case <-ctx.Done():
 	}
 }
