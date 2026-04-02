@@ -103,8 +103,11 @@ func Validate(cfg *KingdomConfig) error {
 		if v.Name == "" {
 			return fmt.Errorf("vassal at index %d: name must not be empty", i)
 		}
-		if v.Command == "" {
+		if v.Command == "" && v.Type != "serial" {
 			return fmt.Errorf("vassal %q: command must not be empty", v.Name)
+		}
+		if v.Type == "serial" && v.SerialPort == "" {
+			return fmt.Errorf("vassal %q: serial_port must not be empty for type:serial", v.Name)
 		}
 		if _, exists := vassalNames[v.Name]; exists {
 			return fmt.Errorf("duplicate vassal name: %q", v.Name)

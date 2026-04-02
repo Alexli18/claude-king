@@ -1,10 +1,18 @@
 package daemon
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/alexli18/claude-king/internal/config"
 )
+
+func sttyFlag() string {
+	if runtime.GOOS == "darwin" {
+		return "-f"
+	}
+	return "-F"
+}
 
 func TestExpandSerialCommand_Linux(t *testing.T) {
 	v := config.VassalConfig{
@@ -13,7 +21,7 @@ func TestExpandSerialCommand_Linux(t *testing.T) {
 		SerialPort: "/dev/ttyUSB0",
 		BaudRate:   9600,
 	}
-	want := "stty -F /dev/ttyUSB0 9600 raw -echo && cat /dev/ttyUSB0"
+	want := "stty " + sttyFlag() + " /dev/ttyUSB0 9600 raw -echo && cat /dev/ttyUSB0"
 	got := expandSerialCommand(v)
 	if got != want {
 		t.Errorf("unexpected command:\n  got:  %q\n  want: %q", got, want)
@@ -27,7 +35,7 @@ func TestExpandSerialCommand_DefaultBaud(t *testing.T) {
 		SerialPort: "/dev/ttyUSB1",
 		BaudRate:   0, // unset → default 115200
 	}
-	want := "stty -F /dev/ttyUSB1 115200 raw -echo && cat /dev/ttyUSB1"
+	want := "stty " + sttyFlag() + " /dev/ttyUSB1 115200 raw -echo && cat /dev/ttyUSB1"
 	got := expandSerialCommand(v)
 	if got != want {
 		t.Errorf("unexpected command:\n  got:  %q\n  want: %q", got, want)

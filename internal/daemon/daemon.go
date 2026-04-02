@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -369,7 +370,12 @@ func expandSerialCommand(v config.VassalConfig) string {
 	}
 	baud := v.BaudRateOrDefault()
 	port := v.SerialPort
-	return fmt.Sprintf("stty -F %s %d raw -echo && cat %s", port, baud, port)
+	// macOS uses `stty -f`, Linux uses `stty -F`.
+	sttyFlag := "-F"
+	if runtime.GOOS == "darwin" {
+		sttyFlag = "-f"
+	}
+	return fmt.Sprintf("stty %s %s %d raw -echo && cat %s", sttyFlag, port, baud, port)
 }
 
 // startVassals creates PTY sessions for all autostart shell-type vassals in config (T014).
