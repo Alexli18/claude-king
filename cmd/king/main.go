@@ -164,14 +164,14 @@ func cmdUpDetach() {
 	}
 	logFile.Close()
 
+	pid := cmd.Process.Pid // capture BEFORE Release() zeroes it
+
 	// Release parent's reference to the child process so it doesn't become a
 	// zombie if the poll loop times out. The daemon is now fully detached.
 	if err := cmd.Process.Release(); err != nil {
 		// Non-fatal: log but continue — the daemon is running.
 		fmt.Fprintf(os.Stderr, "warning: could not release daemon process: %v\n", err)
 	}
-
-	pid := cmd.Process.Pid
 
 	// Poll for socket file — daemon signals readiness by creating it.
 	sockPath := daemon.SocketPathForRoot(rootDir)
