@@ -37,7 +37,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: king <command>")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  up      Start the Kingdom daemon")
+	fmt.Fprintln(os.Stderr, "  up [--detach]  Start the Kingdom daemon")
 	fmt.Fprintln(os.Stderr, "  down    Stop the Kingdom daemon")
 	fmt.Fprintln(os.Stderr, "  mcp     Start MCP server on stdio (for Claude Code)")
 	fmt.Fprintln(os.Stderr, "  dashboard  Open the TUI dashboard")
@@ -82,12 +82,18 @@ func cmdUp() {
 	}
 
 	if daemonMode {
-		// Daemon mode: block until context is cancelled by shutdown RPC.
+		// Daemon mode: block until context is cancelled.
+		// When "king down" sends the shutdown RPC, the daemon's "shutdown"
+		// handler calls d.cancel() (see daemon.go registerRealHandlers /
+		// registerStubHandlers). That cancel func is the same one bound to
+		// ctx here, so <-ctx.Done() unblocks and the defer cancel() / Stop()
+		// sequence below runs correctly.
 		<-ctx.Done()
 	} else {
 		fmt.Println("Kingdom is running. Press Ctrl+C to stop.")
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
 		select {
 		case <-sigCh:
 			fmt.Println("\nShutting down...")
@@ -103,7 +109,8 @@ func cmdUp() {
 }
 
 func cmdUpDetach() {
-	fmt.Println("TODO: detach")
+	fmt.Fprintln(os.Stderr, "error: --detach not yet implemented")
+	os.Exit(1)
 }
 
 func cmdDown() {

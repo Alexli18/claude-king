@@ -1,0 +1,34 @@
+# Go
+*.exe
+*.test
+*.out
+vendor/
+*.prof
+
+# Build outputs
+/king
+/kingctl
+dist/
+
+# SQLite
+*.db
+*.sqlite
+
+# King runtime files
+.king/king.pid
+.king/king.sock
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log
