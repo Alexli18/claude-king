@@ -21,6 +21,11 @@ type VassalConfig struct {
 	Type          string            `yaml:"type,omitempty"`     // "shell" (default) | "claude"
 	Host          string            `yaml:"host,omitempty"`     // SSH host for remote vassals (future use)
 	SSHUser       string            `yaml:"ssh_user,omitempty"` // SSH user (future use)
+
+	// Serial-specific (only used when Type == "serial")
+	SerialPort     string `yaml:"serial_port,omitempty"`
+	BaudRate       int    `yaml:"baud_rate,omitempty"`
+	SerialProtocol string `yaml:"serial_protocol,omitempty"` // "esp32" | "nmea" | "at" | "" (auto)
 }
 
 // AutostartOrDefault returns the autostart value, defaulting to true if not set.
@@ -61,6 +66,9 @@ type Settings struct {
 	SovereignApproval           bool `yaml:"sovereign_approval,omitempty"`
 	SovereignApprovalTimeout    int  `yaml:"sovereign_approval_timeout,omitempty"`
 	AuditMaxTraceOutput         int  `yaml:"audit_max_trace_output,omitempty"`
+
+	SecurityScanner     string   `yaml:"security_scanner,omitempty"`
+	SecurityScannerArgs []string `yaml:"security_scanner_args,omitempty"`
 }
 
 // DefaultSettings returns settings with sensible defaults.
