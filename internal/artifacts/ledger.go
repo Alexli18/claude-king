@@ -184,7 +184,7 @@ func (l *Ledger) runExternalScanner(filePath string) (blocked bool, reason strin
 	err := cmd.Run()
 
 	if ctx.Err() == context.DeadlineExceeded {
-		// Fail-open on timeout
+		slog.Warn("SCANNER_TIMEOUT", "scanner", l.settings.SecurityScanner, "file", filePath)
 		return false, ""
 	}
 
