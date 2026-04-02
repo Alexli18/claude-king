@@ -13,13 +13,15 @@ func TestVassalConfig_SerialDefaults(t *testing.T) {
 		t.Fatalf("expected zero BaudRate raw field, got %d", v.BaudRate)
 	}
 	// BaudRateOrDefault returns 115200
-	if v.BaudRateOrDefault() != 115200 {
-		t.Fatalf("expected BaudRateOrDefault()=115200, got %d", v.BaudRateOrDefault())
+	got := v.BaudRateOrDefault()
+	if got != 115200 {
+		t.Fatalf("expected BaudRateOrDefault()=115200, got %d", got)
 	}
 	// Explicit baud rate is preserved
 	v2 := config.VassalConfig{BaudRate: 9600}
-	if v2.BaudRateOrDefault() != 9600 {
-		t.Fatalf("expected BaudRateOrDefault()=9600, got %d", v2.BaudRateOrDefault())
+	got2 := v2.BaudRateOrDefault()
+	if got2 != 9600 {
+		t.Fatalf("expected BaudRateOrDefault()=9600, got %d", got2)
 	}
 	if v.SerialProtocol != "" {
 		t.Fatalf("expected empty SerialProtocol, got %q", v.SerialProtocol)
