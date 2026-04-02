@@ -1,6 +1,7 @@
 package vassal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ type VassalServer struct {
 
 	mu         sync.Mutex
 	activeTask *Task
+	taskCancel context.CancelFunc // Critical 2: cancel func for the running subprocess
 	mcpServer  *server.MCPServer
 }
 
@@ -131,6 +133,7 @@ func (s *VassalServer) handleDispatchTask(_ context.Context, req mcp.CallToolReq
 		}
 	}
 
+	// Minor: first check avoids unnecessary I/O.
 	s.mu.Lock()
 	if s.activeTask != nil && (s.activeTask.Status == TaskStatusAccepted || s.activeTask.Status == TaskStatusRunning) {
 		s.mu.Unlock()
@@ -138,14 +141,18 @@ func (s *VassalServer) handleDispatchTask(_ context.Context, req mcp.CallToolReq
 	}
 	s.mu.Unlock()
 
-	// Create and save task BEFORE setting activeTask.
+	// SaveTask outside lock (I/O).
 	t := NewTask(s.name, taskDesc, ctx)
 	if err := SaveTask(s.kingDir, t); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("save task: %v", err)), nil
 	}
 
-	// Only set activeTask after successful save.
+	// Minor: re-check and set activeTask atomically (authoritative guard).
 	s.mu.Lock()
+	if s.activeTask != nil && (s.activeTask.Status == TaskStatusAccepted || s.activeTask.Status == TaskStatusRunning) {
+		s.mu.Unlock()
+		return mcp.NewToolResultError(fmt.Sprintf("vassal busy with task %s (status: %s)", s.activeTask.ID, s.activeTask.Status)), nil
+	}
 	s.activeTask = t
 	s.mu.Unlock()
 
@@ -209,9 +216,14 @@ func (s *VassalServer) handleAbortTask(_ context.Context, req mcp.CallToolReques
 	t.Status = TaskStatusAborted
 	_ = SaveTask(s.kingDir, t)
 
+	// Critical 2: cancel the subprocess and clear activeTask atomically.
 	s.mu.Lock()
 	if s.activeTask != nil && s.activeTask.ID == taskID {
 		s.activeTask = nil
+		if s.taskCancel != nil {
+			s.taskCancel()
+			s.taskCancel = nil
+		}
 	}
 	s.mu.Unlock()
 
@@ -226,8 +238,21 @@ func (s *VassalServer) handleAbortTask(_ context.Context, req mcp.CallToolReques
 func (s *VassalServer) runTask(t *Task) {
 	s.logger.Info("running task", "task_id", t.ID, "task", t.Task)
 
-	// Mark as running.
+	// Important 4: guard against zero/negative timeout.
+	if s.timeoutMin <= 0 {
+		t.Status = TaskStatusFailed
+		t.Error = "timeoutMin must be > 0"
+		_ = SaveTask(s.kingDir, t)
+		s.mu.Lock()
+		s.activeTask = nil
+		s.mu.Unlock()
+		return
+	}
+
+	// Critical 1: write t.Status under lock so readers see a consistent value.
+	s.mu.Lock()
 	t.Status = TaskStatusRunning
+	s.mu.Unlock()
 	if err := SaveTask(s.kingDir, t); err != nil {
 		s.logger.Error("failed to save running status", "task_id", t.ID, "err", err)
 	}
@@ -245,6 +270,11 @@ func (s *VassalServer) runTask(t *Task) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Critical 2: store cancel so handleAbortTask can kill the subprocess.
+	s.mu.Lock()
+	s.taskCancel = cancel
+	s.mu.Unlock()
+
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p", prompt,
 		"--dangerously-skip-permissions",
@@ -252,13 +282,22 @@ func (s *VassalServer) runTask(t *Task) {
 	)
 	cmd.Dir = s.repoPath
 
+	// Important 5: capture stderr so it can be included in error messages.
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
 	out, err := cmd.Output()
+
+	// Important 3: do LoadTask outside the lock to avoid blocking under I/O.
+	current, loadErr := LoadTask(s.kingDir, t.ID)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check if aborted while claude was running.
-	current, loadErr := LoadTask(s.kingDir, t.ID)
+	// Critical 2: clear taskCancel now that subprocess has finished.
+	s.taskCancel = nil
+
+	// Important 3: check abort status (loaded before acquiring lock).
 	if loadErr == nil && current.Status == TaskStatusAborted {
 		s.activeTask = nil
 		return
@@ -268,8 +307,13 @@ func (s *VassalServer) runTask(t *Task) {
 		t.Status = TaskStatusTimeout
 		t.Error = fmt.Sprintf("task exceeded %d minute timeout", s.timeoutMin)
 	} else if err != nil {
+		// Important 5: include stderr in the error message.
 		t.Status = TaskStatusFailed
-		t.Error = err.Error()
+		errMsg := err.Error()
+		if stderrBuf.Len() > 0 {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, stderrBuf.String())
+		}
+		t.Error = errMsg
 		t.Output = string(out)
 	} else {
 		t.Status = TaskStatusDone
