@@ -292,6 +292,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.config.Settings.SovereignApprovalTimeout,
 	)
 
+	// Wire VassalClientPool into MCP server for dispatch_task/get_task_status/abort_task.
+	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
+
 	// Update RPC handlers to use real implementations.
 	d.registerRealHandlers()
 
@@ -721,6 +724,19 @@ func (d *Daemon) dispatch(req RPCRequest) RPCResponse {
 // ---------------------------------------------------------------------------
 // PTY manager adapter for MCP interface
 // ---------------------------------------------------------------------------
+
+// vassalPoolAdapter bridges *VassalClientPool to the mcp.VassalPool interface.
+type vassalPoolAdapter struct {
+	pool *VassalClientPool
+}
+
+func (a *vassalPoolAdapter) Get(name string) (mcp.VassalCaller, bool) {
+	vc, ok := a.pool.Get(name)
+	if !ok {
+		return nil, false
+	}
+	return vc, true
+}
 
 // ptyManagerAdapter bridges pty.Manager to the mcp.PTYManager interface.
 type ptyManagerAdapter struct {
