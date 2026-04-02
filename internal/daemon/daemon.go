@@ -420,7 +420,7 @@ func (d *Daemon) startVassals() error {
 		// Start hang detector (T058).
 		if sess, ok := d.ptyMgr.GetSession(vc.Name); ok {
 			sess.StartHangDetector(5*time.Minute, func(name string) {
-				d.logger.Warn("vassal appears hung (no output)", "name", name)
+				d.logger.Warn("VASSAL_FAILED", "name", name, "exit", "hung", "duration", "5m")
 			})
 		}
 

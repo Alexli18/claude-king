@@ -33,10 +33,14 @@ func (d *Daemon) injectAutoContracts(repoPath string) {
 	if len(contracts) == 0 {
 		return
 	}
+	contractNames := make([]string, len(contracts))
+	for i, c := range contracts {
+		contractNames[i] = c.Name
+	}
 	d.config.Patterns = MergeAutoContracts(d.config.Patterns, contracts)
-	d.logger.Info("auto-integrity contracts injected",
+	d.logger.Info("AUTO_INTEGRITY",
 		"repo", repoPath,
-		"project_type", string(pt),
-		"contracts", len(contracts),
+		"type", string(pt),
+		"contracts", contractNames,
 	)
 }

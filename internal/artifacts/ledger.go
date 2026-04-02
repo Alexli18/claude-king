@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"os"
 	"path/filepath"
@@ -42,9 +43,10 @@ func (l *Ledger) Register(name, filePath, producerID, mimeType string) (*store.A
 		return nil, fmt.Errorf("artifact path is a directory, not a file: %s", filePath)
 	}
 
-	// Secret scan: block artifacts containing secrets (INVALID_SECURITY).
+	// Secret scan: block artifacts containing secrets.
 	if result := security.Scan(filePath); result.Blocked {
-		return nil, fmt.Errorf("INVALID_SECURITY: %s", result.Reason)
+		slog.Info("FILE_BLOCKED", "reason", result.Reason, "file", filePath)
+		return nil, fmt.Errorf("FILE_BLOCKED: %s", result.Reason)
 	}
 
 	// Auto-detect MIME type from extension if not provided.
@@ -89,6 +91,7 @@ func (l *Ledger) Register(name, filePath, producerID, mimeType string) (*store.A
 		if err != nil {
 			return nil, fmt.Errorf("re-fetch updated artifact: %w", err)
 		}
+		slog.Info("ARTIFACT_REGISTERED", "name", updated.Name, "version", updated.Version, "checksum", updated.Checksum)
 		return updated, nil
 	}
 
@@ -110,6 +113,7 @@ func (l *Ledger) Register(name, filePath, producerID, mimeType string) (*store.A
 		return nil, fmt.Errorf("create artifact: %w", err)
 	}
 
+	slog.Info("ARTIFACT_REGISTERED", "name", a.Name, "version", a.Version, "checksum", a.Checksum)
 	return &a, nil
 }
 

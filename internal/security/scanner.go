@@ -56,15 +56,21 @@ var textExtensions = map[string]bool{
 
 const maxContentScanSize = 1 << 20 // 1 MB
 
-// secretPatterns are compiled regexes for content scanning.
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)AWS_ACCESS_KEY_ID\s*[=:]\s*[A-Z0-9]{16,}`),
-	regexp.MustCompile(`(?i)AWS_SECRET_ACCESS_KEY\s*[=:]\s*[A-Za-z0-9/+=]{32,}`),
-	regexp.MustCompile(`(?i)GITHUB_TOKEN\s*[=:]\s*[A-Za-z0-9_]{20,}`),
-	regexp.MustCompile(`ghp_[A-Za-z0-9]{36}`),
-	regexp.MustCompile(`ghs_[A-Za-z0-9]{36}`),
-	regexp.MustCompile(`sk-[A-Za-z0-9]{48}`),
-	regexp.MustCompile(`-----BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY-----`),
+// secretPattern pairs a compiled regex with its structured reason code.
+type secretPattern struct {
+	re     *regexp.Regexp
+	reason string
+}
+
+// secretPatterns are compiled regexes for content scanning with structured reason codes.
+var secretPatterns = []secretPattern{
+	{regexp.MustCompile(`(?i)AWS_ACCESS_KEY_ID\s*[=:]\s*[A-Z0-9]{16,}`), "AWS_KEY_DETECTED"},
+	{regexp.MustCompile(`(?i)AWS_SECRET_ACCESS_KEY\s*[=:]\s*[A-Za-z0-9/+=]{32,}`), "AWS_KEY_DETECTED"},
+	{regexp.MustCompile(`(?i)GITHUB_TOKEN\s*[=:]\s*[A-Za-z0-9_]{20,}`), "GITHUB_TOKEN_DETECTED"},
+	{regexp.MustCompile(`ghp_[A-Za-z0-9]{36}`), "GITHUB_TOKEN_DETECTED"},
+	{regexp.MustCompile(`ghs_[A-Za-z0-9]{36}`), "GITHUB_TOKEN_DETECTED"},
+	{regexp.MustCompile(`sk-[A-Za-z0-9]{48}`), "SCANNER_REJECTED"},
+	{regexp.MustCompile(`-----BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY-----`), "PRIVATE_KEY_DETECTED"},
 }
 
 // Scan checks filePath for secrets using a filename blacklist and smart content scan.
@@ -75,24 +81,24 @@ func Scan(filePath string) ScanResult {
 
 	// 1. Exact filename blacklist.
 	if blockedNames[base] {
-		return ScanResult{Blocked: true, Reason: "filename:blacklisted:" + base}
+		return ScanResult{Blocked: true, Reason: "FILENAME_BLACKLISTED"}
 	}
 
 	// 2. Extension blacklist.
 	if blockedExtensions[ext] {
-		return ScanResult{Blocked: true, Reason: "filename:blocked-extension:" + ext}
+		return ScanResult{Blocked: true, Reason: "EXTENSION_BLOCKED"}
 	}
 
 	// 3. Filename prefix patterns (e.g. "credentials.*").
 	for _, prefix := range blockedFilenamePatterns {
 		if strings.HasPrefix(base, prefix) {
-			return ScanResult{Blocked: true, Reason: "filename:blocked-pattern:" + prefix}
+			return ScanResult{Blocked: true, Reason: "FILENAME_BLACKLISTED"}
 		}
 	}
 
 	// 4. Filename glob: *.env or .env.*
 	if ext == ".env" || strings.HasPrefix(base, ".env.") {
-		return ScanResult{Blocked: true, Reason: "filename:env-variant:" + base}
+		return ScanResult{Blocked: true, Reason: "FILENAME_BLACKLISTED"}
 	}
 
 	// 5. Smart content scan (text files ≤ 1MB only).
@@ -114,13 +120,9 @@ func Scan(filePath string) ScanResult {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		for _, re := range secretPatterns {
-			if re.MatchString(line) {
-				s := re.String()
-				if len(s) > 30 {
-					s = s[:30]
-				}
-				return ScanResult{Blocked: true, Reason: "content:" + s}
+		for _, sp := range secretPatterns {
+			if sp.re.MatchString(line) {
+				return ScanResult{Blocked: true, Reason: sp.reason}
 			}
 		}
 	}

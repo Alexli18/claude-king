@@ -47,8 +47,8 @@ func TestRegister_BlockedBySecretScanner_DotEnv(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for .env file, got nil")
 	}
-	if !strings.Contains(err.Error(), "INVALID_SECURITY") {
-		t.Errorf("expected INVALID_SECURITY in error, got: %v", err)
+	if !strings.Contains(err.Error(), "FILE_BLOCKED") {
+		t.Errorf("expected FILE_BLOCKED in error, got: %v", err)
 	}
 }
 
@@ -64,8 +64,8 @@ func TestRegister_BlockedBySecretScanner_AWSKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for file with AWS key, got nil")
 	}
-	if !strings.Contains(err.Error(), "INVALID_SECURITY") {
-		t.Errorf("expected INVALID_SECURITY in error, got: %v", err)
+	if !strings.Contains(err.Error(), "FILE_BLOCKED") {
+		t.Errorf("expected FILE_BLOCKED in error, got: %v", err)
 	}
 }
 
