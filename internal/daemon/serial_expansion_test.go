@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/alexli18/claude-king/internal/config"
@@ -14,15 +13,10 @@ func TestExpandSerialCommand_Linux(t *testing.T) {
 		SerialPort: "/dev/ttyUSB0",
 		BaudRate:   9600,
 	}
-	cmd := expandSerialCommand(v)
-	if cmd == "" {
-		t.Fatal("expected non-empty command")
-	}
-	if !strings.Contains(cmd, "/dev/ttyUSB0") {
-		t.Errorf("expected command to contain port, got: %q", cmd)
-	}
-	if !strings.Contains(cmd, "9600") {
-		t.Errorf("expected command to contain baud rate, got: %q", cmd)
+	want := "stty -F /dev/ttyUSB0 9600 raw -echo && cat /dev/ttyUSB0"
+	got := expandSerialCommand(v)
+	if got != want {
+		t.Errorf("unexpected command:\n  got:  %q\n  want: %q", got, want)
 	}
 }
 
@@ -33,12 +27,10 @@ func TestExpandSerialCommand_DefaultBaud(t *testing.T) {
 		SerialPort: "/dev/ttyUSB1",
 		BaudRate:   0, // unset → default 115200
 	}
-	cmd := expandSerialCommand(v)
-	if cmd == "" {
-		t.Fatal("expected non-empty command")
-	}
-	if !strings.Contains(cmd, "115200") {
-		t.Errorf("expected command to contain default baud 115200, got: %q", cmd)
+	want := "stty -F /dev/ttyUSB1 115200 raw -echo && cat /dev/ttyUSB1"
+	got := expandSerialCommand(v)
+	if got != want {
+		t.Errorf("unexpected command:\n  got:  %q\n  want: %q", got, want)
 	}
 }
 
