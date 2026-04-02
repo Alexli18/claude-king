@@ -44,6 +44,14 @@ func (v VassalConfig) TypeOrDefault() string {
 	return v.Type
 }
 
+// BaudRateOrDefault returns the configured BaudRate or 115200 if not set.
+func (v VassalConfig) BaudRateOrDefault() int {
+	if v.BaudRate == 0 {
+		return 115200
+	}
+	return v.BaudRate
+}
+
 // PatternConfig represents an event detection pattern
 type PatternConfig struct {
 	Name            string `yaml:"name"`
