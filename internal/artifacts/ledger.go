@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/alexli18/claude-king/internal/security"
 	"github.com/alexli18/claude-king/internal/store"
 	"github.com/google/uuid"
 )
@@ -39,6 +40,11 @@ func (l *Ledger) Register(name, filePath, producerID, mimeType string) (*store.A
 	}
 	if info.IsDir() {
 		return nil, fmt.Errorf("artifact path is a directory, not a file: %s", filePath)
+	}
+
+	// Secret scan: block artifacts containing secrets (INVALID_SECURITY).
+	if result := security.Scan(filePath); result.Blocked {
+		return nil, fmt.Errorf("INVALID_SECURITY: %s", result.Reason)
 	}
 
 	// Auto-detect MIME type from extension if not provided.

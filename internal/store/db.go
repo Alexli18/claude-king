@@ -851,7 +851,7 @@ func scanKingdom(s scanner) (*Kingdom, error) {
 
 func scanVassal(s scanner) (*Vassal, error) {
 	v, err := scanVassalFromScanner(s)
-	if err != nil && err == sql.ErrNoRows {
+	if err != nil && errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return v, err
@@ -879,7 +879,7 @@ func scanVassalRow(rows *sql.Rows) (*Vassal, error) {
 
 func scanArtifact(s scanner) (*Artifact, error) {
 	a, err := scanArtifactFromScanner(s)
-	if err != nil && err == sql.ErrNoRows {
+	if err != nil && errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return a, err
@@ -953,7 +953,7 @@ func scanAuditEntryRow(s scanner) (*AuditEntry, error) {
 
 func scanActionTrace(s scanner) (*ActionTrace, error) {
 	t, err := scanActionTraceFromScanner(s)
-	if err != nil && err == sql.ErrNoRows {
+	if err != nil && errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return t, err
@@ -995,7 +995,7 @@ func scanActionTraceRow(rows *sql.Rows) (*ActionTrace, error) {
 
 func scanApprovalRequest(s scanner) (*ApprovalRequest, error) {
 	r, err := scanApprovalRequestFromScanner(s)
-	if err != nil && err == sql.ErrNoRows {
+	if err != nil && errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return r, err
