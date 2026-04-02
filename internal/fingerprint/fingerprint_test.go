@@ -65,6 +65,27 @@ func TestFingerprint_Unknown(t *testing.T) {
 	}
 }
 
+func TestSerialProtocolForBaud(t *testing.T) {
+	cases := []struct {
+		baud     int
+		expected fingerprint.ProjectType
+	}{
+		{4800, fingerprint.ProjectTypeNMEA},
+		{9600, fingerprint.ProjectTypeNMEA},
+		{19200, fingerprint.ProjectTypeNMEA},
+		{38400, fingerprint.ProjectTypeNMEA},
+		{115200, fingerprint.ProjectTypeESP32},
+		{57600, fingerprint.ProjectTypeUnknown},
+		{0, fingerprint.ProjectTypeESP32}, // default baud → ESP32
+	}
+	for _, tc := range cases {
+		got := fingerprint.SerialProtocolForBaud(tc.baud)
+		if got != tc.expected {
+			t.Errorf("baud %d: expected %q, got %q", tc.baud, tc.expected, got)
+		}
+	}
+}
+
 func TestProjectType_SerialConstants(t *testing.T) {
 	if fingerprint.ProjectTypeESP32 == "" {
 		t.Fatal("ProjectTypeESP32 must not be empty")

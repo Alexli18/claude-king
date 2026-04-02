@@ -22,6 +22,7 @@ import (
 	"github.com/alexli18/claude-king/internal/audit"
 	"github.com/alexli18/claude-king/internal/config"
 	"github.com/alexli18/claude-king/internal/events"
+	"github.com/alexli18/claude-king/internal/fingerprint"
 	"github.com/alexli18/claude-king/internal/mcp"
 	"github.com/alexli18/claude-king/internal/pty"
 	"github.com/alexli18/claude-king/internal/store"
@@ -345,6 +346,21 @@ func (d *Daemon) auditCleanupLoop() {
 	}
 }
 
+/// mergePatterns appends newPatterns to existing, skipping any with duplicate Name.
+func mergePatterns(existing, newPatterns []config.PatternConfig) []config.PatternConfig {
+	seen := make(map[string]bool)
+	for _, p := range existing {
+		seen[p.Name] = true
+	}
+	for _, p := range newPatterns {
+		if !seen[p.Name] {
+			existing = append(existing, p)
+			seen[p.Name] = true
+		}
+	}
+	return existing
+}
+
 // expandSerialCommand converts a type:serial VassalConfig into a shell command
 // that streams the serial port to stdout.
 // For non-serial vassals it returns the original Command unchanged.
@@ -428,6 +444,24 @@ func (d *Daemon) startVassals() error {
 			}
 			// Auto-Integrity: inject contracts based on project type.
 			d.injectAutoContracts(repoPath)
+		}
+
+		// Auto-detect serial protocol and inject contracts by baud rate (T005).
+		if vc.TypeOrDefault() == "serial" {
+			proto := vc.SerialProtocol
+			if proto == "" {
+				pt := fingerprint.SerialProtocolForBaud(vc.BaudRate)
+				if pt != fingerprint.ProjectTypeUnknown {
+					proto = string(pt)
+				}
+			}
+			if proto != "" {
+				autoContracts := fingerprint.DefaultContracts(fingerprint.ProjectType(proto), "")
+				for i := range autoContracts {
+					autoContracts[i].Source = vc.Name
+				}
+				d.config.Patterns = mergePatterns(d.config.Patterns, autoContracts)
+			}
 		}
 
 		d.logger.Info("vassal started", "name", vc.Name)

@@ -34,6 +34,23 @@ func Fingerprint(rootDir string) ProjectType {
 	return ProjectTypeUnknown
 }
 
+// SerialProtocolForBaud returns the auto-detected ProjectType for a serial baud rate.
+// Returns ProjectTypeUnknown if no auto-detection matches.
+// Baud 0 is treated as 115200 (ESP-IDF default).
+func SerialProtocolForBaud(baud int) ProjectType {
+	if baud == 0 {
+		baud = 115200
+	}
+	switch baud {
+	case 4800, 9600, 19200, 38400:
+		return ProjectTypeNMEA
+	case 115200:
+		return ProjectTypeESP32
+	default:
+		return ProjectTypeUnknown
+	}
+}
+
 func hasHardwareIndicators(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
