@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -98,6 +99,8 @@ type Daemon struct {
 	logger        *slog.Logger
 	handlers      map[string]rpcHandler
 	wg            sync.WaitGroup
+	vassalPool    *VassalClientPool
+	vassalProcs   map[string]*os.Process // name → running king-vassal process
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -116,12 +119,15 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 	})).With("component", "daemon")
 
 	d := &Daemon{
-		rootDir:  absRoot,
-		pidFile:  pidPathForRoot(absRoot),
-		sockPath: SocketPathForRoot(absRoot),
-		logger:   logger,
-		handlers: make(map[string]rpcHandler),
+		rootDir:     absRoot,
+		pidFile:     pidPathForRoot(absRoot),
+		sockPath:    SocketPathForRoot(absRoot),
+		logger:      logger,
+		handlers:    make(map[string]rpcHandler),
+		vassalProcs: make(map[string]*os.Process),
 	}
+
+	d.vassalPool = NewVassalClientPool()
 
 	d.registerStubHandlers()
 
@@ -261,6 +267,19 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return fmt.Errorf("start vassals: %w", err)
 	}
 
+	// Launch king-vassal subprocesses for claude-type vassals.
+	for _, v := range d.config.Vassals {
+		if v.TypeOrDefault() == "claude" {
+			if err := d.startClaudeVassal(v); err != nil {
+				d.listener.Close()
+				os.Remove(d.sockPath)
+				d.removePIDFile()
+				d.store.Close()
+				return fmt.Errorf("start claude vassal %q: %w", v.Name, err)
+			}
+		}
+	}
+
 	// Create artifact ledger and MCP server.
 	ledger := artifacts.NewLedger(d.store, d.kingdom.ID)
 	adapter := &ptyManagerAdapter{mgr: d.ptyMgr}
@@ -395,6 +414,80 @@ func (d *Daemon) startVassals() error {
 	return nil
 }
 
+// startClaudeVassal launches a king-vassal subprocess for a claude-type vassal,
+// waits for its socket to appear, and connects to it via the VassalClientPool.
+func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
+	exe, err := resolveKingVassalBinary()
+	if err != nil {
+		return fmt.Errorf("resolve king-vassal binary: %w", err)
+	}
+
+	kingDir := filepath.Join(d.rootDir, kingDirName)
+	sockPath := filepath.Join(kingDir, "vassals", v.Name+".sock")
+
+	cmd := exec.Command(exe,
+		"--name", v.Name,
+		"--repo", v.RepoPath,
+		"--king-dir", kingDir,
+		"--king-sock", d.sockPath,
+		"--timeout", "10",
+	)
+	cmd.Stdout = os.Stderr // log to stderr for now
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start king-vassal %q: %w", v.Name, err)
+	}
+
+	// Wait for socket to appear (up to 3s).
+	for i := 0; i < 30; i++ {
+		if _, err := os.Stat(sockPath); err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+		if i == 29 {
+			cmd.Process.Kill()
+			return fmt.Errorf("king-vassal %q did not start within 3s", v.Name)
+		}
+	}
+
+	// Connect client.
+	if _, err := d.vassalPool.Connect(v.Name, sockPath); err != nil {
+		cmd.Process.Kill()
+		return fmt.Errorf("connect to king-vassal %q: %w", v.Name, err)
+	}
+
+	d.vassalProcs[v.Name] = cmd.Process
+	d.logger.Info("claude vassal started", "name", v.Name, "sock", sockPath)
+	return nil
+}
+
+// resolveKingVassalBinary finds the king-vassal binary by checking PATH first,
+// then falling back to the same directory as the current executable.
+func resolveKingVassalBinary() (string, error) {
+	// Try PATH first.
+	if path, err := exec.LookPath("king-vassal"); err == nil {
+		return path, nil
+	}
+	// Fall back to same directory as the current executable.
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	candidate := filepath.Join(filepath.Dir(exe), "king-vassal")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+	return "", fmt.Errorf("king-vassal not found in PATH or alongside %s", exe)
+}
+
+// Done returns a channel that is closed when the daemon context is cancelled
+// (i.e. when the shutdown RPC fires d.cancel()). Callers can wait on this to
+// know that a graceful Stop() should follow.
+func (d *Daemon) Done() <-chan struct{} {
+	return d.ctx.Done()
+}
+
 // PTYMgr returns the PTY manager for external use.
 func (d *Daemon) PTYMgr() *pty.Manager {
 	return d.ptyMgr
@@ -448,6 +541,15 @@ func (d *Daemon) Stop() error {
 		case <-time.After(10 * time.Second):
 			d.logger.Warn("vassal shutdown timed out after 10s, forcing kill")
 		}
+	}
+
+	// Stop claude vassals.
+	if d.vassalPool != nil {
+		d.vassalPool.DisconnectAll()
+	}
+	for name, proc := range d.vassalProcs {
+		d.logger.Info("stopping claude vassal", "name", name)
+		_ = proc.Signal(syscall.SIGTERM)
 	}
 
 	// Close the listener to unblock acceptLoop.
