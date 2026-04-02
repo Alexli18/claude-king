@@ -83,3 +83,64 @@ func TestDefaultContracts_Hardware(t *testing.T) {
 		t.Errorf("expected 0 contracts for Hardware, got %d", len(contracts))
 	}
 }
+
+func TestDefaultContracts_ESP32(t *testing.T) {
+	contracts := fingerprint.DefaultContracts(fingerprint.ProjectTypeESP32, "")
+	if len(contracts) == 0 {
+		t.Fatal("expected at least one ESP32 contract")
+	}
+	names := make(map[string]bool)
+	for _, c := range contracts {
+		names[c.Name] = true
+	}
+	required := []string{"esp32-panic", "esp32-abort", "esp32-brownout", "esp32-stackoverflow", "esp32-error", "esp32-warning"}
+	for _, r := range required {
+		if !names[r] {
+			t.Errorf("missing required contract: %s", r)
+		}
+	}
+}
+
+func TestDefaultContracts_NMEA(t *testing.T) {
+	contracts := fingerprint.DefaultContracts(fingerprint.ProjectTypeNMEA, "")
+	if len(contracts) == 0 {
+		t.Fatal("expected at least one NMEA contract")
+	}
+	names := make(map[string]bool)
+	for _, c := range contracts {
+		names[c.Name] = true
+	}
+	for _, r := range []string{"nmea-invalid-fix", "nmea-no-signal"} {
+		if !names[r] {
+			t.Errorf("missing required contract: %s", r)
+		}
+	}
+}
+
+func TestDefaultContracts_AT(t *testing.T) {
+	contracts := fingerprint.DefaultContracts(fingerprint.ProjectTypeAT, "")
+	if len(contracts) == 0 {
+		t.Fatal("expected at least one AT contract")
+	}
+	names := make(map[string]bool)
+	for _, c := range contracts {
+		names[c.Name] = true
+	}
+	for _, r := range []string{"at-error", "at-no-carrier", "at-registration-denied"} {
+		if !names[r] {
+			t.Errorf("missing required contract: %s", r)
+		}
+	}
+}
+
+func TestDefaultContracts_ESP32_SeverityValues(t *testing.T) {
+	contracts := fingerprint.DefaultContracts(fingerprint.ProjectTypeESP32, "")
+	for _, c := range contracts {
+		switch c.Severity {
+		case "critical", "error", "warning", "info":
+			// valid
+		default:
+			t.Errorf("contract %q has invalid severity %q", c.Name, c.Severity)
+		}
+	}
+}

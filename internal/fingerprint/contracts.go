@@ -26,6 +26,26 @@ func DefaultContracts(pt ProjectType, rootDir string) []config.PatternConfig {
 		}
 	case ProjectTypeNode:
 		return nodeContracts(rootDir)
+	case ProjectTypeESP32:
+		return []config.PatternConfig{
+			{Name: "esp32-panic",         Regex: `(?i)panic:|Guru Meditation Error`, Severity: "critical", Source: "auto"},
+			{Name: "esp32-abort",         Regex: `abort\(\)`,                         Severity: "critical", Source: "auto"},
+			{Name: "esp32-brownout",      Regex: `(?i)brownout detector`,             Severity: "critical", Source: "auto"},
+			{Name: "esp32-stackoverflow", Regex: `(?i)stack overflow`,                Severity: "critical", Source: "auto"},
+			{Name: "esp32-error",         Regex: `^E \(\d+\) `,                       Severity: "error",    Source: "auto"},
+			{Name: "esp32-warning",       Regex: `^W \(\d+\) `,                       Severity: "warning",  Source: "auto"},
+		}
+	case ProjectTypeNMEA:
+		return []config.PatternConfig{
+			{Name: "nmea-invalid-fix", Regex: `\$GP[A-Z]+,[^,]*,V,`, Severity: "warning", Source: "auto"},
+			{Name: "nmea-no-signal",   Regex: `\$GPGSA,A,1,`,        Severity: "warning", Source: "auto"},
+		}
+	case ProjectTypeAT:
+		return []config.PatternConfig{
+			{Name: "at-error",               Regex: `^(ERROR|\+CME ERROR|\+CMS ERROR)`, Severity: "error",   Source: "auto"},
+			{Name: "at-no-carrier",          Regex: `^(NO CARRIER|NO DIALTONE|BUSY)`,   Severity: "warning", Source: "auto"},
+			{Name: "at-registration-denied", Regex: `\+CREG: [04]`,                     Severity: "error",   Source: "auto"},
+		}
 	default:
 		return nil
 	}
