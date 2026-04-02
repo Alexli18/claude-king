@@ -34,9 +34,9 @@ const (
 	dbFileName   = "king.db"
 )
 
-// socketPathForRoot returns a unique socket path based on the root directory hash.
+// SocketPathForRoot returns a unique socket path based on the root directory hash.
 // This prevents collisions when multiple Kingdoms run in different directories.
-func socketPathForRoot(rootDir string) string {
+func SocketPathForRoot(rootDir string) string {
 	h := sha256.Sum256([]byte(rootDir))
 	return filepath.Join(rootDir, kingDirName, fmt.Sprintf("king-%x.sock", h[:8]))
 }
@@ -118,7 +118,7 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 	d := &Daemon{
 		rootDir:  absRoot,
 		pidFile:  pidPathForRoot(absRoot),
-		sockPath: socketPathForRoot(absRoot),
+		sockPath: SocketPathForRoot(absRoot),
 		logger:   logger,
 		handlers: make(map[string]rpcHandler),
 	}
@@ -489,7 +489,7 @@ func IsRunning(rootDir string) (bool, error) {
 	}
 
 	pidPath := pidPathForRoot(absRoot)
-	sockPath := socketPathForRoot(absRoot)
+	sockPath := SocketPathForRoot(absRoot)
 
 	// Check PID file.
 	pidData, err := os.ReadFile(pidPath)
@@ -526,7 +526,7 @@ func IsRunning(rootDir string) (bool, error) {
 // SocketPath returns the socket path for a given root directory.
 // Exported so that the client can find the correct socket.
 func SocketPath(rootDir string) string {
-	return socketPathForRoot(rootDir)
+	return SocketPathForRoot(rootDir)
 }
 
 // ---------------------------------------------------------------------------

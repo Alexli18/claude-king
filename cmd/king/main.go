@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/alexli18/claude-king/internal/daemon"
 	"github.com/alexli18/claude-king/internal/tui"
@@ -109,7 +112,70 @@ func cmdUp() {
 }
 
 func cmdUpDetach() {
-	fmt.Fprintln(os.Stderr, "error: --detach not yet implemented")
+	rootDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if already running.
+	running, err := daemon.IsRunning(rootDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if running {
+		fmt.Println("Kingdom is already running.")
+		return
+	}
+
+	// Prepare log file at .king/daemon.log
+	kingDir := filepath.Join(rootDir, ".king")
+	if err := os.MkdirAll(kingDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "error creating .king dir: %v\n", err)
+		os.Exit(1)
+	}
+	logPath := filepath.Join(kingDir, "daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening log file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Re-exec self with --daemon flag, detached from terminal.
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error resolving executable: %v\n", err)
+		os.Exit(1)
+	}
+
+	cmd := exec.Command(exe, "up", "--daemon")
+	cmd.Dir = rootDir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		fmt.Fprintf(os.Stderr, "error starting daemon: %v\n", err)
+		os.Exit(1)
+	}
+	logFile.Close()
+
+	pid := cmd.Process.Pid
+
+	// Poll for socket file — daemon signals readiness by creating it.
+	sockPath := daemon.SocketPathForRoot(rootDir)
+	for i := 0; i < 20; i++ {
+		time.Sleep(50 * time.Millisecond)
+		if _, err := os.Stat(sockPath); err == nil {
+			fmt.Printf("Kingdom started (pid: %d)\n", pid)
+			fmt.Printf("Logs: %s\n", logPath)
+			return
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "error: daemon did not start within 1s (check %s)\n", logPath)
 	os.Exit(1)
 }
 
