@@ -3,6 +3,7 @@ package registry
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -35,6 +36,12 @@ func (r *Registry) Register(rootPath string, entry Entry) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	unlock, err := r.lockFile()
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer unlock()
+
 	entries, _ := r.load()
 	if entries == nil {
 		entries = make(map[string]Entry)
@@ -49,7 +56,16 @@ func (r *Registry) Unregister(rootPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	unlock, err := r.lockFile()
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer unlock()
+
 	entries, _ := r.load()
+	if entries == nil {
+		entries = make(map[string]Entry)
+	}
 	delete(entries, rootPath)
 	return r.save(entries)
 }
@@ -66,6 +82,12 @@ func (r *Registry) List() (map[string]Entry, error) {
 func (r *Registry) ListAlive() (map[string]Entry, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	unlock, err := r.lockFile()
+	if err != nil {
+		return nil, fmt.Errorf("acquire lock: %w", err)
+	}
+	defer unlock()
 
 	entries, err := r.load()
 	if err != nil {
@@ -86,6 +108,24 @@ func (r *Registry) ListAlive() (map[string]Entry, error) {
 		_ = r.save(alive)
 	}
 	return alive, nil
+}
+
+// lockFile acquires an exclusive advisory lock on <r.path>.lock.
+// Returns a function that releases the lock and closes the file.
+func (r *Registry) lockFile() (unlock func(), err error) {
+	lockPath := r.path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
 }
 
 // load reads and parses the JSON file. Returns empty map on missing file.
