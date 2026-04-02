@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +31,8 @@ func main() {
 		cmdMCP()
 	case "dashboard":
 		cmdDashboard()
+	case "list":
+		cmdList()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -42,9 +45,10 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  up [--detach]  Start the Kingdom daemon")
-	fmt.Fprintln(os.Stderr, "  down    Stop the Kingdom daemon")
-	fmt.Fprintln(os.Stderr, "  mcp     Start MCP server on stdio (for Claude Code)")
-	fmt.Fprintln(os.Stderr, "  dashboard  Open the TUI dashboard")
+	fmt.Fprintln(os.Stderr, "  down           Stop the Kingdom daemon")
+	fmt.Fprintln(os.Stderr, "  mcp            Start MCP server on stdio (for Claude Code)")
+	fmt.Fprintln(os.Stderr, "  dashboard      Open the TUI dashboard")
+	fmt.Fprintln(os.Stderr, "  list           List all registered kingdoms")
 }
 
 // registryPath returns the path to the global King P2P registry file.
@@ -297,6 +301,31 @@ func cmdMCP() {
 
 	if err := d.Stop(); err != nil {
 		fmt.Fprintf(os.Stderr, "error stopping: %v\n", err)
+	}
+}
+
+func cmdList() {
+	reg := registry.NewRegistry(registryPath())
+	entries, err := reg.ListAlive()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading registry: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("No kingdoms registered.")
+		return
+	}
+
+	fmt.Printf("%-40s %-12s %-8s %s\n", "KINGDOM", "STATUS", "PID", "SOCKET")
+	fmt.Println(strings.Repeat("-", 80))
+
+	for path, e := range entries {
+		status := "running"
+		if !e.Reachable {
+			status = "unreachable"
+		}
+		fmt.Printf("%-40s %-12s %-8d %s\n", path, status, e.PID, e.Socket)
 	}
 }
 
