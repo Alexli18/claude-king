@@ -8,7 +8,11 @@ vendor/
 # Build outputs
 /king
 /kingctl
+/king-vassal
 dist/
+
+# King runtime directory
+.king/
 
 # SQLite
 *.db
