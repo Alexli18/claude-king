@@ -603,8 +603,9 @@ func (s *Server) handleAbortTask(ctx context.Context, request mcp.CallToolReques
 	return mcp.NewToolResultText(result), nil
 }
 
-// ParseSinceDuration converts a user-supplied string like "5m", "1h", "30s"
-// to a time.Duration.
+// ParseSinceDuration converts a user-supplied duration string like "5m", "1h", "30s"
+// to a time.Duration. It is an exported wrapper over time.ParseDuration to provide
+// a stable extension point for supporting additional formats in future.
 func ParseSinceDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
@@ -629,13 +630,14 @@ func FilterEventsBySeverity(events []store.Event, severity string) []store.Event
 func (s *Server) handleGetSerialEvents(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	s.logger.Debug("handling get_serial_events call")
 
-	vassalName := request.GetString("vassal", "")
+	vassalName, err := request.RequireString("vassal")
+	if err != nil {
+		return mcp.NewToolResultError("INVALID_PARAMS: vassal name is required"), nil
+	}
+
 	sinceStr := request.GetString("since", "")
 	severity := request.GetString("severity", "")
 
-	if vassalName == "" {
-		return mcp.NewToolResultError("vassal is required"), nil
-	}
 	if sinceStr == "" {
 		sinceStr = "1h"
 	}
@@ -647,9 +649,9 @@ func (s *Server) handleGetSerialEvents(_ context.Context, request mcp.CallToolRe
 
 	after := time.Now().Add(-dur)
 
-	// Fetch all events for the kingdom (no severity/source filter at DB layer so
-	// we can apply the time window in-memory alongside the source filter).
-	all, err := s.store.ListEvents(s.kingdomID, "", "", 0)
+	// Fetch events pre-filtered by source at the DB layer to reduce load;
+	// the time-window filter is applied in-memory below.
+	all, err := s.store.ListEvents(s.kingdomID, "", vassalName, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("store error: %v", err)), nil
 	}
@@ -664,7 +666,7 @@ func (s *Server) handleGetSerialEvents(_ context.Context, request mcp.CallToolRe
 				continue
 			}
 		}
-		if e.SourceID == vassalName && t.After(after) {
+		if t.After(after) {
 			filtered = append(filtered, e)
 		}
 	}
