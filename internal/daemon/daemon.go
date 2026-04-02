@@ -345,6 +345,18 @@ func (d *Daemon) auditCleanupLoop() {
 	}
 }
 
+// expandSerialCommand converts a type:serial VassalConfig into a shell command
+// that streams the serial port to stdout.
+// For non-serial vassals it returns the original Command unchanged.
+func expandSerialCommand(v config.VassalConfig) string {
+	if v.Type != "serial" {
+		return v.Command
+	}
+	baud := v.BaudRateOrDefault()
+	port := v.SerialPort
+	return fmt.Sprintf("stty -F %s %d raw -echo && cat %s", port, baud, port)
+}
+
 // startVassals creates PTY sessions for all autostart shell-type vassals in config (T014).
 // Claude-type vassals are managed separately by startClaudeVassal.
 func (d *Daemon) startVassals() error {
@@ -366,7 +378,7 @@ func (d *Daemon) startVassals() error {
 		}
 
 		id := uuid.New().String()
-		_, err := d.ptyMgr.CreateSession(id, vc.Name, vc.Command, cwd, vc.Env)
+		_, err := d.ptyMgr.CreateSession(id, vc.Name, expandSerialCommand(vc), cwd, vc.Env)
 		if err != nil {
 			d.logger.Error("failed to start vassal", "name", vc.Name, "err", err)
 			continue
