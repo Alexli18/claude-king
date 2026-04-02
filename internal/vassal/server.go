@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -221,13 +222,63 @@ func (s *VassalServer) handleAbortTask(_ context.Context, req mcp.CallToolReques
 	return mcp.NewToolResultText(string(result)), nil
 }
 
-// runTask is a stub — will be implemented in Task 6.
+// runTask generates VASSAL.md, launches claude headless, and updates task state.
 func (s *VassalServer) runTask(t *Task) {
-	s.logger.Info("runTask stub called", "task_id", t.ID)
-	t.Status = TaskStatusFailed
-	t.Error = "runTask not yet implemented"
-	_ = SaveTask(s.kingDir, t)
+	s.logger.Info("running task", "task_id", t.ID, "task", t.Task)
+
+	// Mark as running.
+	t.Status = TaskStatusRunning
+	if err := SaveTask(s.kingDir, t); err != nil {
+		s.logger.Error("failed to save running status", "task_id", t.ID, "err", err)
+	}
+
+	// Write VASSAL.md — Claude Code reads this as context.
+	if err := WriteVassalMD(s.repoPath, s.name, t, nil); err != nil {
+		s.logger.Warn("could not write VASSAL.md", "err", err)
+	}
+
+	// Build the prompt: task + reference to VASSAL.md.
+	prompt := fmt.Sprintf("%s\n\n(See VASSAL.md in this directory for your role and context.)", t.Task)
+
+	// Run claude headless with a timeout.
+	timeout := time.Duration(s.timeoutMin) * time.Minute
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "claude",
+		"-p", prompt,
+		"--dangerously-skip-permissions",
+		"--output-format", "text",
+	)
+	cmd.Dir = s.repoPath
+
+	out, err := cmd.Output()
+
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if aborted while claude was running.
+	current, loadErr := LoadTask(s.kingDir, t.ID)
+	if loadErr == nil && current.Status == TaskStatusAborted {
+		s.activeTask = nil
+		return
+	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Status = TaskStatusTimeout
+		t.Error = fmt.Sprintf("task exceeded %d minute timeout", s.timeoutMin)
+	} else if err != nil {
+		t.Status = TaskStatusFailed
+		t.Error = err.Error()
+		t.Output = string(out)
+	} else {
+		t.Status = TaskStatusDone
+		t.Output = string(out)
+	}
+
+	if err := SaveTask(s.kingDir, t); err != nil {
+		s.logger.Error("failed to save task result", "task_id", t.ID, "err", err)
+	}
 	s.activeTask = nil
-	s.mu.Unlock()
+	s.logger.Info("task finished", "task_id", t.ID, "status", t.Status)
 }
