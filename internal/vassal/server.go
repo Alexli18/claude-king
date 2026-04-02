@@ -60,10 +60,14 @@ func (s *VassalServer) Start(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("listen unix %s: %w", sockPath, err)
 	}
 
+	// sync.Once ensures ln.Close() is called exactly once even if both goroutines race.
+	var closeOnce sync.Once
+	closeLn := func() { closeOnce.Do(func() { ln.Close() }) }
+
 	go func() {
 		defer func() {
-			ln.Close()
-			_ = os.Remove(sockPath) // Fix 4: clean up socket on exit
+			closeLn()
+			_ = os.Remove(sockPath)
 		}()
 		for {
 			conn, err := ln.Accept()
@@ -80,10 +84,10 @@ func (s *VassalServer) Start(ctx context.Context) (string, error) {
 		}
 	}()
 
-	// Cancel listener on context done (separate goroutine, no double-close issue).
+	// Cancel listener on context done.
 	go func() {
 		<-ctx.Done()
-		ln.Close()
+		closeLn()
 	}()
 
 	return sockPath, nil
@@ -298,6 +302,9 @@ func (s *VassalServer) runTask(t *Task) {
 	s.taskCancel = nil
 
 	// Important 3: check abort status (loaded before acquiring lock).
+	if loadErr != nil {
+		s.logger.Warn("could not load task for abort-check, proceeding", "task_id", t.ID, "err", loadErr)
+	}
 	if loadErr == nil && current.Status == TaskStatusAborted {
 		s.activeTask = nil
 		return
