@@ -53,12 +53,24 @@ func TestDelegationHelpers(t *testing.T) {
 
 	t.Run("heartbeat updates timestamp", func(t *testing.T) {
 		d.setDelegation("cache", 3333)
+
+		d.delegationMu.RLock()
 		before := d.delegatedVassals["cache"].LastHeartbeat
+		d.delegationMu.RUnlock()
+
 		time.Sleep(2 * time.Millisecond)
 		d.updateHeartbeat("cache", 3333)
+
+		d.delegationMu.RLock()
 		after := d.delegatedVassals["cache"].LastHeartbeat
+		d.delegationMu.RUnlock()
+
 		if !after.After(before) {
 			t.Fatal("expected LastHeartbeat to be updated")
 		}
+	})
+
+	t.Run("release unknown vassal is no-op", func(t *testing.T) {
+		d.releaseDelegation("nonexistent") // should not panic
 	})
 }
