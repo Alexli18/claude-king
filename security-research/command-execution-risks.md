@@ -52,6 +52,6 @@ This requires a compromised or misconfigured orchestrator, not a direct attacker
 ## Recommendations
 
 1. **Document sovereign approval mode clearly** in the README and quickstart as the primary mitigation for command injection risk.
-2. **Add a denylist** for highest-risk patterns (e.g. `curl.*|.*sh`, `rm -rf`, `cat.*credentials`) as a configurable option. See `docs/secure-bash-roadmap.md`.
+2. **Add a denylist** for highest-risk patterns (e.g. `curl.*|.*sh`, `rm -rf`, `cat.*credentials`) as a configurable option. To be detailed in `docs/secure-bash-roadmap.md` (planned).
 3. **Consider gating exec_in through the circuit breaker** in addition to `delegate_control`.
 4. **Scan exec_in output** for secrets using the existing `internal/security/scanner` before returning to the caller.

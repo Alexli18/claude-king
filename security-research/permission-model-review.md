@@ -47,5 +47,5 @@ An AI model calls `dispatch_task(vassal="finance-agent", task="Send wire transfe
 
 1. **Define risk tiers** for MCP tools: read-only (safe), state-modifying (medium), execution (high). Document which tier each tool falls into.
 2. **Extend approval coverage** to at minimum `dispatch_task` and `register_artifact` in a future release.
-3. **Extract a `PermissionGateway` interface** from `ApprovalManager` to decouple enforcement from `daemon.Daemon`. See `docs/permission-model.md` for a refactoring plan.
+3. **Extract a `PermissionGateway` interface** from `ApprovalManager` to decouple enforcement from `daemon.Daemon`. To be detailed in `docs/permission-model.md` (planned).
 4. **Add TODO comments** at the registration points in `internal/mcp/server.go` marking tools that lack approval gates.
