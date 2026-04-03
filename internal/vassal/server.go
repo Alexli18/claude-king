@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -91,6 +92,15 @@ func (s *VassalServer) Start(ctx context.Context) (string, error) {
 	}()
 
 	return sockPath, nil
+}
+
+// StartStdio serves MCP over the provided reader/writer (stdio mode).
+// Used when launched by Claude Code via .mcp.json.
+func (s *VassalServer) StartStdio(ctx context.Context, r io.Reader, w io.Writer) error {
+	s.mcpServer = server.NewMCPServer("king-vassal-"+s.name, "1.0.0")
+	s.registerTools()
+	stdioSrv := server.NewStdioServer(s.mcpServer)
+	return stdioSrv.Listen(ctx, r, w)
 }
 
 // serveConn handles a single MCP client connection using the stdio transport
