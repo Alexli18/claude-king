@@ -108,6 +108,24 @@ type DelegationInfo struct {
 	LastHeartbeat time.Time
 }
 
+// GuardResult is the outcome of a single guard health check.
+type GuardResult struct {
+	OK        bool
+	Message   string
+	CheckedAt time.Time
+}
+
+// GuardState tracks the runtime health of a single guard for a vassal.
+type GuardState struct {
+	VassalName       string
+	GuardIndex       int
+	GuardType        string
+	ConsecutiveFails int
+	LastCheckTime    time.Time
+	LastResult       GuardResult
+	CircuitOpen      bool // true = circuit breaker triggered; AI modifications blocked
+}
+
 // Daemon manages the lifecycle of a Kingdom daemon process, including the
 // UDS server, store, config, and PID file.
 type Daemon struct {
@@ -135,6 +153,8 @@ type Daemon struct {
 	externalVassalsMu sync.RWMutex
 	delegatedVassals  map[string]DelegationInfo
 	delegationMu      sync.RWMutex
+	guardStates       map[string]*GuardState
+	guardStatesMu     sync.RWMutex
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -161,6 +181,7 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 		vassalProcs:      make(map[string]*vassalProc),
 		externalVassals:  make(map[string]ExternalVassalInfo),
 		delegatedVassals: make(map[string]DelegationInfo),
+		guardStates:      make(map[string]*GuardState),
 	}
 
 	d.vassalPool = NewVassalClientPool()
@@ -354,6 +375,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// Update RPC handlers to use real implementations.
 	d.registerRealHandlers()
+
+	// Start guard runners for all configured vassal guards.
+	d.startGuardRunners(d.ctx)
 
 	// Start periodic audit retention cleanup (every 6 hours) (T044).
 	d.wg.Add(1)
@@ -1620,6 +1644,7 @@ func (d *Daemon) registerRealHandlers() {
 	}
 
 	registerDelegationHandlers(d)
+	registerGuardHandlers(d)
 }
 
 // ---------------------------------------------------------------------------

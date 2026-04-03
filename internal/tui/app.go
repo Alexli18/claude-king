@@ -44,6 +44,7 @@ type dataMsg struct {
 	status    components.StatusInfo
 	audit     []components.AuditInfo
 	approvals []components.ApprovalInfo
+	guards    []components.GuardInfo
 }
 
 // errMsg carries an error from async operations.
@@ -211,6 +212,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vassals.Vassals = msg.vassals
 		m.events.Events = msg.events
 		m.health.Status = msg.status
+		m.health.Guards = msg.guards
 		m.audit.Entries = msg.audit
 		m.audit.Approvals = msg.approvals
 		// Reset approval cursor if out of bounds.
@@ -504,12 +506,44 @@ func fetchData(client *daemon.Client, filterSince string) tea.Cmd {
 			}
 		}
 
+		// Fetch guard status (non-critical — empty list if not available).
+		var guardEntries []components.GuardInfo
+		guardData, guardErr := client.Call("guard_status", nil)
+		if guardErr == nil {
+			var guardResp struct {
+				Guards []struct {
+					VassalName       string `json:"vassal_name"`
+					GuardIndex       int    `json:"guard_index"`
+					GuardType        string `json:"guard_type"`
+					CircuitOpen      bool   `json:"circuit_open"`
+					ConsecutiveFails int    `json:"consecutive_fails"`
+					LastResult       struct {
+						Message string `json:"message"`
+					} `json:"last_result"`
+				} `json:"guards"`
+			}
+			if json.Unmarshal(guardData, &guardResp) == nil {
+				guardEntries = make([]components.GuardInfo, len(guardResp.Guards))
+				for i, g := range guardResp.Guards {
+					guardEntries[i] = components.GuardInfo{
+						VassalName:       g.VassalName,
+						GuardIndex:       g.GuardIndex,
+						GuardType:        g.GuardType,
+						CircuitOpen:      g.CircuitOpen,
+						ConsecutiveFails: g.ConsecutiveFails,
+						LastMessage:      g.LastResult.Message,
+					}
+				}
+			}
+		}
+
 		return dataMsg{
 			vassals:   vassals,
 			events:    events,
 			status:    status,
 			audit:     auditEntries,
 			approvals: approvalEntries,
+			guards:    guardEntries,
 		}
 	}
 }

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -137,4 +138,73 @@ func TestDelegateReleaseHandler(t *testing.T) {
 			t.Fatalf("expected ok=true for no-op release")
 		}
 	})
+}
+
+func TestDelegateControl_CircuitOpen(t *testing.T) {
+	d := &Daemon{
+		delegatedVassals: make(map[string]DelegationInfo),
+		guardStates:      make(map[string]*GuardState),
+		logger:           newTestLogger(t),
+	}
+	d.handlers = make(map[string]rpcHandler)
+	registerDelegationHandlers(d)
+
+	// Simulate an open circuit for vassal "api".
+	d.guardStatesMu.Lock()
+	d.guardStates["api:0"] = &GuardState{
+		VassalName:       "api",
+		GuardIndex:       0,
+		GuardType:        "port_check",
+		ConsecutiveFails: 3,
+		CircuitOpen:      true,
+	}
+	d.guardStatesMu.Unlock()
+
+	params, _ := json.Marshal(map[string]interface{}{
+		"vassal":      "api",
+		"session_pid": 1234,
+		"force":       false,
+	})
+	_, err := d.handlers["delegate_control"](params)
+	if err == nil {
+		t.Fatal("expected error when circuit is open, got nil")
+	}
+	if !strings.Contains(err.Error(), "circuit open") {
+		t.Fatalf("expected 'circuit open' in error message, got: %v", err)
+	}
+}
+
+func TestDelegateControl_CircuitClosed(t *testing.T) {
+	d := &Daemon{
+		delegatedVassals: make(map[string]DelegationInfo),
+		guardStates:      make(map[string]*GuardState),
+		logger:           newTestLogger(t),
+	}
+	d.handlers = make(map[string]rpcHandler)
+	registerDelegationHandlers(d)
+
+	// Guard exists but circuit is closed (healthy).
+	d.guardStatesMu.Lock()
+	d.guardStates["api:0"] = &GuardState{
+		VassalName:       "api",
+		GuardIndex:       0,
+		GuardType:        "port_check",
+		ConsecutiveFails: 1,
+		CircuitOpen:      false,
+	}
+	d.guardStatesMu.Unlock()
+
+	params, _ := json.Marshal(map[string]interface{}{
+		"vassal":      "api",
+		"session_pid": 1234,
+		"force":       false,
+	})
+	result, err := d.handlers["delegate_control"](params)
+	if err != nil {
+		t.Fatalf("expected delegation to succeed when circuit closed, got: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if m["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", m)
+	}
 }

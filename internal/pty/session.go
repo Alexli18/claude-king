@@ -11,12 +11,22 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	ptylib "github.com/creack/pty/v2"
 )
+
+// timedLine holds a single output line with its arrival timestamp.
+type timedLine struct {
+	t    time.Time
+	text string
+}
+
+// maxRecentLines is the maximum number of recent lines retained per session.
+const maxRecentLines = 1000
 
 // ansiRegex strips ANSI/VT100 escape sequences from terminal output.
 var ansiRegex = regexp.MustCompile(
@@ -115,6 +125,13 @@ type Session struct {
 	// lastOutput tracks the time of the most recent output for hang detection (T058).
 	lastOutput   time.Time
 	lastOutputMu sync.Mutex
+
+	// bytesWritten counts total bytes received from the PTY (for data_rate guard).
+	bytesWritten atomic.Int64
+
+	// recentLines holds up to maxRecentLines timestamped output lines (for log_watch guard).
+	recentLines   []timedLine
+	recentLinesMu sync.Mutex
 }
 
 // RingBuffer is a fixed-size circular buffer for terminal output.
@@ -262,10 +279,22 @@ func (s *Session) readLoop() {
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		now := time.Now()
+
+		// Track byte throughput for data_rate guard.
+		s.bytesWritten.Add(int64(len(scanner.Bytes()) + 1)) // +1 for newline
+
+		// Maintain timestamped line history for log_watch guard.
+		s.recentLinesMu.Lock()
+		s.recentLines = append(s.recentLines, timedLine{t: now, text: line})
+		if len(s.recentLines) > maxRecentLines {
+			s.recentLines = s.recentLines[len(s.recentLines)-maxRecentLines:]
+		}
+		s.recentLinesMu.Unlock()
 
 		// Update last output time for hang detection (T058).
 		s.lastOutputMu.Lock()
-		s.lastOutput = time.Now()
+		s.lastOutput = now
 		s.lastOutputMu.Unlock()
 
 		s.mu.RLock()
@@ -585,6 +614,26 @@ func (s *Session) executeCommand(command string, timeout time.Duration) CommandR
 			}
 		}
 	}
+}
+
+// BytesWritten returns the total number of bytes received from the PTY output.
+// Used by the data_rate guard to measure throughput.
+func (s *Session) BytesWritten() int64 {
+	return s.bytesWritten.Load()
+}
+
+// RecentOutputLines returns output lines received since the given time.
+// Used by the log_watch guard to scan for error patterns.
+func (s *Session) RecentOutputLines(since time.Time) []string {
+	s.recentLinesMu.Lock()
+	defer s.recentLinesMu.Unlock()
+	var result []string
+	for _, tl := range s.recentLines {
+		if !tl.t.Before(since) {
+			result = append(result, tl.text)
+		}
+	}
+	return result
 }
 
 // Resize changes the PTY window size.

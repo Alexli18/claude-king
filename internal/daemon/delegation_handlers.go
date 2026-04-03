@@ -5,6 +5,22 @@ import (
 	"fmt"
 )
 
+// anyCircuitOpen returns true and a descriptive error message if any guard for
+// the given vassal has an open circuit breaker. Reads guardStates under RLock.
+func (d *Daemon) anyCircuitOpen(vassal string) (bool, string) {
+	d.guardStatesMu.RLock()
+	defer d.guardStatesMu.RUnlock()
+	for _, gs := range d.guardStates {
+		if gs.VassalName == vassal && gs.CircuitOpen {
+			return true, fmt.Sprintf(
+				"Guard '%s' (index %d) circuit open for vassal '%s'. Consecutive failures: %d. AI modifications blocked.",
+				gs.GuardType, gs.GuardIndex, vassal, gs.ConsecutiveFails,
+			)
+		}
+	}
+	return false, ""
+}
+
 // registerDelegationHandlers adds delegate_control, delegate_heartbeat,
 // and delegate_release to d.handlers. Called from registerRealHandlers().
 func registerDelegationHandlers(d *Daemon) {
@@ -23,6 +39,11 @@ func registerDelegationHandlers(d *Daemon) {
 
 		d.delegationMu.Lock()
 		defer d.delegationMu.Unlock()
+
+		// Block delegation if a guard circuit breaker is open for this vassal.
+		if open, reason := d.anyCircuitOpen(req.Vassal); open {
+			return nil, fmt.Errorf("%s", reason)
+		}
 
 		if existing, ok := d.delegatedVassals[req.Vassal]; ok && !req.Force {
 			return nil, fmt.Errorf("vassal %q is already delegated to PID %d; use force=true to override",

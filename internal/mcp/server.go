@@ -181,6 +181,7 @@ func (s *Server) RegisterTools() {
 	s.registerDelegateControl()
 	s.registerDelegateRelease()
 	s.registerDelegateStatus()
+	s.registerGuardStatus()
 }
 
 // registerListVassals registers the list_vassals tool.
