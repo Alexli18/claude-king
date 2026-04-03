@@ -228,6 +228,10 @@ func (s *Server) registerGetEvents() {
 	s.mcpServer.AddTool(tool, s.handleGetEvents)
 }
 
+// TODO(permission): register_artifact writes to the Ledger after secret scanning.
+// Risk tier: state-modifying. No approval gate currently implemented.
+// Future: route through permission.Gateway.CheckPolicy("register_artifact", req) before execution.
+
 // registerRegisterArtifact registers a stub for the register_artifact tool (Phase 6).
 func (s *Server) registerRegisterArtifact() {
 	tool := mcp.NewTool("register_artifact",
@@ -333,6 +337,10 @@ func (s *Server) registerReadNeighbor() {
 	)
 	s.mcpServer.AddTool(tool, s.handleReadNeighbor)
 }
+
+// TODO(permission): dispatch_task dispatches work to a vassal process.
+// Risk tier: state-modifying. No approval gate currently implemented.
+// Future: route through permission.Gateway.CheckPolicy("dispatch_task", req) before execution.
 
 // registerDispatchTask registers the dispatch_task tool.
 func (s *Server) registerDispatchTask() {
