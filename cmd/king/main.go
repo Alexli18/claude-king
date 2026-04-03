@@ -330,13 +330,32 @@ func cmdList() {
 	}
 	sort.Strings(paths)
 
+	fmt.Printf("%-45s  %-12s  %-8s  %s\n", "KINGDOM", "STATUS", "PID", "ID")
+
 	for _, path := range paths {
 		e := entries[path]
 		status := "running"
 		if !e.Reachable {
 			status = "unreachable"
 		}
-		fmt.Printf("Kingdom: %s  [%s, pid=%d]\n", path, status, e.PID)
+
+		shortID := "--------"
+		if e.Reachable {
+			idClient, err := daemon.NewClient(path)
+			if err == nil {
+				if raw, err := idClient.Call("kingdom.status", nil); err == nil {
+					var st struct {
+						ID string `json:"id"`
+					}
+					if json.Unmarshal(raw, &st) == nil && len(st.ID) >= 8 {
+						shortID = st.ID[:8]
+					}
+				}
+				idClient.Close()
+			}
+		}
+
+		fmt.Printf("%-45s  %-12s  %-8d  %s\n", path, status, e.PID, shortID)
 
 		if !e.Reachable {
 			fmt.Println("  vassals: (kingdom unreachable)")
