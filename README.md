@@ -24,44 +24,48 @@ One MCP daemon to coordinate them all.
 
 ---
 
-## The Manifesto
+## The Problem
 
-AI agents write your code. Fast. Relentlessly. Across 20 windows at once.
+You run Claude Code in 3 repos simultaneously. Each instance is blind to what the others are doing. You're the one watching for errors, switching terminals, copying context between windows.
 
-**But who watches the realm?**
+King is a daemon that sits above your AI agents. It watches every process, scans every artifact for secrets, and surfaces errors across all repos in one place. Run 10 Claude instances in parallel — King keeps them coordinated.
 
-Claude King is a **Sovereign Development** platform — a daemon that sits above your AI agents, watches every process, guards every artifact, and gives you one throne to rule them all. While Cursor generates, King verifies. While Claude commits, King audits. You are not a developer anymore. You are the Sovereign.
+*King assumes you'd rather govern than babysit.*
 
 ---
 
 ## Quick Start
 
 ```bash
-# Install via script (macOS / Linux — requires a GitHub Release)
-curl -fsSL https://raw.githubusercontent.com/alexli18/claude-king/main/install.sh | bash
-```
-
-# Or build from source:
-
-```bash
-# 1. Build
+# Build from source (Go 1.22+ required)
 git clone https://github.com/alexli18/claude-king && cd claude-king
-go build -o king ./cmd/king && go build -o kingctl ./cmd/kingctl
+make build && make install-user   # installs to ~/.local/bin, patches PATH
 
-# 2. Rise
+# Start your Kingdom
 cd ~/your-project
 king up             # foreground (logs to stdout)
 king up --detach    # background daemon (logs to .king/daemon.log)
 
-# 3. Rule
-king list           # show all running kingdoms (cross-directory)
-kingctl status
+# Inspect
+king list           # all running kingdoms across your machine
+king status         # current kingdom + vassals
+king doctor         # health check
 
-# 4. Stop
+# Stop
 king down
 ```
 
-That's it. Your Kingdom is running.
+---
+
+## How It Works
+
+1. `king up` starts a daemon in your project root and creates a Unix socket at `.king/king-<hash>.sock`
+2. Each `king-vassal` process (one per sub-repo) connects to that socket and registers itself
+3. King monitors vassal output, matches it against patterns, and stores events in SQLite
+4. You add King as an MCP server — Claude Code can then call `list_vassals()`, `get_events()`, `exec_in()` and get live data from all running agents
+5. Every file reaching the Artifact Ledger is scanned for secrets before it's stored
+
+**Topology:** each project directory gets its own King daemon. `king list` shows all running kingdoms across your machine. Each Claude Code window connects to the King in its project root via `king mcp`.
 
 ---
 
@@ -92,11 +96,11 @@ Every Kingdom is governed by a chain of loyal subjects:
 |---|---|---|
 | 👑 **The King** | `king` daemon | Orchestrates the realm. Holds the Ledger. Issues the law. |
 | ⚔️ **The Vassal** | `king-vassal` | Embedded agent in each repo. Sends tribute (artifacts) to the throne. |
-| 🛡️ **The Royal Guard** | `internal/security` | Stands at the Ledger gates. No secret token enters the realm. |
-| 🔮 **The Court Mage** | `internal/fingerprint` | Divines the nature of each project. Inscribes the appropriate integrity contracts. |
-| ⚖️ **The Inquisitor** | `internal/daemon/auto_integrity` | Subjects every artifact to trial. Dirty code does not pass. |
-| 📜 **The Chronicler** | `internal/store` (SQLite) | Records every action, every artifact, every failure. Forever. |
-| 📯 **The Herald** | `internal/events` | Cries across the realm when builds fall and secrets are found. |
+| 🛡️ **The Royal Guard** | `internal/security` | Blocks AWS keys, private keys, `.env` files before they reach the Ledger. |
+| 🔮 **The Court Mage** | `internal/fingerprint` | Auto-detects project type (Go, Node) and applies matching integrity rules. |
+| ⚖️ **The Inquisitor** | `internal/daemon/auto_integrity` | Runs integrity contracts against vassal output. Flags violations automatically. |
+| 📜 **The Chronicler** | `internal/store` (SQLite) | Persists all events, artifacts, and audit records. |
+| 📯 **The Herald** | `internal/events` | Emits structured events when builds fail, secrets are detected, or patterns match. |
 
 ```
   YOUR TERMINAL (Claude Code / Cursor)
@@ -307,20 +311,6 @@ Claude: "The firmware is crashing. Let me investigate."
 ```
 
 ---
-
-## Philosophy
-
-```
-You are not a developer.
-You are a Sovereign.
-
-Your code is your realm.
-Your AI agents are your vassals.
-King is your throne.
-
-Let them build.
-You rule.
-```
 
 ---
 
