@@ -58,6 +58,25 @@ That's it. Your Kingdom is running.
 
 ---
 
+## Connect to Claude Code
+
+Add King as an MCP server in your project's `.mcp.json` (or `~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "king": {
+      "command": "king",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Code. You'll have access to all MCP tools (`list_vassals`, `get_events`, `exec_in`, `read_artifact`, etc.) directly in your AI assistant.
+
+---
+
 ## The Hierarchy
 
 Every Kingdom is governed by a chain of loyal subjects:
@@ -132,6 +151,28 @@ LEDGER          4 artifacts  ·  0 blocked  ·  1 flagged
 ## Configuration
 
 King is zero-config by default. Drop a `kingdom.yml` in `.king/` to declare your vassals:
+
+### Simple example (Go project)
+
+```yaml
+# .king/kingdom.yml
+name: my-project
+
+vassals:
+  - name: server
+    command: go run ./cmd/server
+    autostart: true
+    env:
+      PORT: "8080"
+
+  - name: tests
+    command: go test ./... -v
+    autostart: false
+```
+
+Run `king up` — King starts `server` automatically. Trigger tests on demand via Claude: `exec_in("tests", "go test ./...")`.
+
+### Full example (with serial/ESP32)
 
 ```yaml
 # .king/kingdom.yml
