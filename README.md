@@ -37,6 +37,13 @@ Claude King is a **Sovereign Development** platform — a daemon that sits above
 ## Quick Start
 
 ```bash
+# Install via script (macOS / Linux — requires a GitHub Release)
+curl -fsSL https://raw.githubusercontent.com/alexli18/claude-king/main/install.sh | bash
+```
+
+# Or build from source:
+
+```bash
 # 1. Build
 git clone https://github.com/alexli18/claude-king && cd claude-king
 go build -o king ./cmd/king && go build -o kingctl ./cmd/kingctl
