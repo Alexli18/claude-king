@@ -1356,6 +1356,9 @@ func (d *Daemon) registerStubHandlers() {
 		if info.Name == "" {
 			return nil, fmt.Errorf("name is required")
 		}
+		if info.PID <= 0 {
+			return nil, fmt.Errorf("pid must be positive")
+		}
 		d.externalVassalsMu.Lock()
 		d.externalVassals[info.Name] = info
 		d.externalVassalsMu.Unlock()
@@ -1364,8 +1367,15 @@ func (d *Daemon) registerStubHandlers() {
 	}
 
 	d.handlers["vassal.list"] = func(_ json.RawMessage) (interface{}, error) {
+		// Snapshot the map under read lock.
 		d.externalVassalsMu.RLock()
-		defer d.externalVassalsMu.RUnlock()
+		snapshot := make([]ExternalVassalInfo, 0, len(d.externalVassals))
+		for _, v := range d.externalVassals {
+			snapshot = append(snapshot, v)
+		}
+		d.externalVassalsMu.RUnlock()
+
+		// Perform liveness checks outside the lock.
 		type vassalEntry struct {
 			Name     string `json:"name"`
 			RepoPath string `json:"repo_path"`
@@ -1373,11 +1383,13 @@ func (d *Daemon) registerStubHandlers() {
 			PID      int    `json:"pid"`
 			Alive    bool   `json:"alive"`
 		}
-		var result []vassalEntry
-		for _, v := range d.externalVassals {
+		result := make([]vassalEntry, 0, len(snapshot))
+		for _, v := range snapshot {
 			alive := false
-			if proc, err := os.FindProcess(v.PID); err == nil {
-				alive = proc.Signal(syscall.Signal(0)) == nil
+			if v.PID > 0 {
+				if proc, err := os.FindProcess(v.PID); err == nil {
+					alive = proc.Signal(syscall.Signal(0)) == nil
+				}
 			}
 			result = append(result, vassalEntry{
 				Name: v.Name, RepoPath: v.RepoPath,
