@@ -371,6 +371,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 	d.wg.Add(1)
 	go d.acceptLoop()
 
+	d.wg.Add(1)
+	go d.runDelegationWarden()
+
 	d.logger.Info("daemon started",
 		"root", d.rootDir,
 		"pid", os.Getpid(),
@@ -1758,7 +1761,7 @@ func (d *Daemon) setDelegation(vassal string, pid int) {
 	defer d.delegationMu.Unlock()
 	d.delegatedVassals[vassal] = DelegationInfo{
 		SessionPID:    pid,
-		LastHeartbeat: time.Now(),
+		LastHeartbeat: timeNow(),
 	}
 }
 
@@ -1771,7 +1774,7 @@ func (d *Daemon) updateHeartbeat(vassal string, pid int) bool {
 	if !ok || info.SessionPID != pid {
 		return false
 	}
-	info.LastHeartbeat = time.Now()
+	info.LastHeartbeat = timeNow()
 	d.delegatedVassals[vassal] = info
 	return true
 }
