@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/alexli18/claude-king/internal/store"
@@ -100,6 +101,9 @@ type Server struct {
 
 	parentKingdomSocket string // non-empty if this MCP runs inside another kingdom
 	inObserverMode      bool
+
+	activeHeartbeats map[string]context.CancelFunc
+	heartbeatMu      sync.Mutex
 }
 
 // NewServer creates a new MCP Server with the given dependencies.
@@ -112,13 +116,14 @@ func NewServer(ptyMgr PTYManager, s *store.Store, ledger ArtifactLedger, kingdom
 	)
 
 	srv := &Server{
-		mcpServer: mcpSrv,
-		ptyMgr:    ptyMgr,
-		store:     s,
-		ledger:    ledger,
-		kingdomID: kingdomID,
-		rootDir:   rootDir,
-		logger:    logger,
+		mcpServer:        mcpSrv,
+		ptyMgr:           ptyMgr,
+		store:            s,
+		ledger:           ledger,
+		kingdomID:        kingdomID,
+		rootDir:          rootDir,
+		logger:           logger,
+		activeHeartbeats: make(map[string]context.CancelFunc),
 	}
 
 	srv.RegisterTools()
@@ -172,6 +177,9 @@ func (s *Server) RegisterTools() {
 	s.registerGetTaskStatus()
 	s.registerAbortTask()
 	s.registerGetSerialEvents()
+	s.registerDelegateControl()
+	s.registerDelegateRelease()
+	s.registerDelegateStatus()
 }
 
 // registerListVassals registers the list_vassals tool.
