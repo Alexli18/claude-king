@@ -22,6 +22,8 @@ One MCP daemon to coordinate them all.
 > *In a world where Claude and Cursor write your code —*
 > *King is the one who answers for it.*
 
+![Demo](demo.gif)
+
 ---
 
 ## The Problem
