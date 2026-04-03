@@ -21,6 +21,7 @@ func main() {
 	kingDir := flag.String("king-dir", ".king", "path to .king directory")
 	kingSocket := flag.String("king-sock", "", "path to king daemon socket (auto-discovered if omitted)")
 	timeoutMin := flag.Int("timeout", 10, "task timeout in minutes")
+	stdio := flag.Bool("stdio", false, "serve MCP over stdio (for Claude Code .mcp.json)")
 	flag.Parse()
 
 	cwd, err := os.Getwd()
@@ -36,7 +37,7 @@ func main() {
 	if *name == "" {
 		*name = filepath.Base(*repoPath)
 	}
-	if *kingSocket == "" {
+	if !*stdio && *kingSocket == "" {
 		sockPath, _, discErr := discovery.FindKingdomSocket(cwd)
 		if discErr != nil {
 			fmt.Fprintln(os.Stderr, "error: No Kingdom found. Run king-daemon init first.")
@@ -63,17 +64,24 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	sockPath, err := srv.Start(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error starting vassal server: %v\n", err)
-		os.Exit(1)
-	}
-	logger.Info("vassal MCP server started", "socket", sockPath)
+	if *stdio {
+		if err := srv.StartStdio(ctx, os.Stdin, os.Stdout); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		sockPath, err := srv.Start(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error starting vassal server: %v\n", err)
+			os.Exit(1)
+		}
+		logger.Info("vassal MCP server started", "socket", sockPath)
 
-	select {
-	case <-sigCh:
-		logger.Info("shutting down")
-		cancel()
-	case <-ctx.Done():
+		select {
+		case <-sigCh:
+			logger.Info("shutting down")
+			cancel()
+		case <-ctx.Done():
+		}
 	}
 }
