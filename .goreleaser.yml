@@ -3,10 +3,6 @@ version: 2
 
 project_name: claude-king
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - id: king
     binary: king
@@ -42,8 +38,16 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+release:
+  github:
+    owner: alexli18
+    name: claude-king
+
 changelog:
-  sort: asc
+  sort: desc
   filters:
     exclude:
       - "^docs:"
