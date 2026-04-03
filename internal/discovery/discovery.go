@@ -41,6 +41,12 @@ type KingdomInfo struct {
 	SocketPath string
 }
 
+// registryFileEntry is the per-kingdom record stored in ~/.king/registry.json.
+type registryFileEntry struct {
+	Socket string `json:"socket"`
+	Name   string `json:"name"`
+}
+
 // FindAllKingdomSockets walks from startDir up to / collecting all kingdom
 // sockets, then merges in any alive kingdoms from the global registry at
 // ~/.king/registry.json. Deduplicates by RootDir.
@@ -75,10 +81,7 @@ func FindAllKingdomSockets(startDir string) ([]KingdomInfo, error) {
 	if err == nil {
 		regPath := filepath.Join(home, ".king", "registry.json")
 		if data, err := os.ReadFile(regPath); err == nil {
-			var entries map[string]struct {
-				Socket string `json:"socket"`
-				Name   string `json:"name"`
-			}
+			var entries map[string]registryFileEntry
 			if err := json.Unmarshal(data, &entries); err == nil {
 				for rootDir, e := range entries {
 					if seen[rootDir] {
