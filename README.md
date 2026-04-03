@@ -8,6 +8,7 @@ When you run Claude Code in multiple repos simultaneously, each instance is isol
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/Protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![CI](https://github.com/alexli18/claude-king/actions/workflows/ci.yml/badge.svg)](https://github.com/alexli18/claude-king/actions)
+[![Release](https://img.shields.io/github/v/release/alexli18/claude-king)](https://github.com/alexli18/claude-king/releases)
 
 ![Demo](demo.gif)
 
@@ -55,10 +56,20 @@ Claude Code already has hooks and MCP support. Here's where they stop and where 
 ## Quick start
 
 ```bash
-# Requires Go 1.25+
-git clone https://github.com/alexli18/claude-king && cd claude-king
-make build && make install-user   # installs king, king-vassal, kingctl to ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/alexli18/claude-king/master/install.sh | bash
+```
 
+<details>
+<summary>Build from source (requires Go 1.25+)</summary>
+
+```bash
+git clone https://github.com/alexli18/claude-king && cd claude-king
+make build && make install-user
+```
+
+</details>
+
+```bash
 # Start your Kingdom
 cd ~/your-project
 king up --detach   # runs as background daemon, logs to .king/daemon.log
@@ -86,6 +97,8 @@ Restart Claude Code. It now has live access to all your running agents via `list
 ---
 
 ## Demo: 4 agents, one control plane
+
+*3 repos, one AWS key leaked, one port down, one hanging PTY. King caught all three.*
 
 ```
 $ king up --detach
@@ -280,7 +293,7 @@ No config required.
 - [x] TUI dashboard (`king tui`)
 - [x] Delegation control + heartbeat warden
 - [x] Health guards with circuit breaker (`guard_status`)
-- [ ] Prebuilt binaries via GitHub Releases
+- [x] Prebuilt binaries via GitHub Releases
 - [ ] Event webhooks
 - [ ] `king doctor` — full diagnostic output
 
