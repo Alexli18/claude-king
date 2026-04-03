@@ -19,6 +19,9 @@ import (
 	"github.com/alexli18/claude-king/internal/tui"
 )
 
+// version is injected at build time via -X main.version=<tag>
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -42,6 +45,8 @@ func main() {
 		cmdPromptInfo()
 	case "doctor":
 		cmdDoctor()
+	case "version", "--version":
+		fmt.Println("king version", version)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -61,6 +66,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  status         Show current kingdom status and ID")
 	fmt.Fprintln(os.Stderr, "  prompt-info    Output kingdom name:id8 for shell prompt (safe for PS1)")
 	fmt.Fprintln(os.Stderr, "  doctor         Check kingdom health")
+	fmt.Fprintln(os.Stderr, "  version        Print king version")
 }
 
 // registryPath returns the path to the global King P2P registry file.
