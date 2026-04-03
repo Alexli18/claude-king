@@ -77,8 +77,9 @@ func (s *Server) handleListVassals(_ context.Context, _ mcp.CallToolRequest) (*m
 	}
 
 	result := map[string]any{
-		"vassals": vassals,
-		"kingdom": kingdomInfo,
+		"vassals":    vassals,
+		"kingdom":    kingdomInfo,
+		"kingdom_id": s.kingdomID,
 	}
 
 	data, err := json.Marshal(result)
@@ -182,7 +183,12 @@ func (s *Server) handleGetEvents(_ context.Context, request mcp.CallToolRequest)
 		})
 	}
 
-	data, err := json.Marshal(entries)
+	result := map[string]any{
+		"events":     entries,
+		"kingdom_id": s.kingdomID,
+	}
+
+	data, err := json.Marshal(result)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal events: %v", err)), nil
 	}
