@@ -1536,6 +1536,7 @@ func (d *Daemon) registerRealHandlers() {
 		}, nil
 	}
 
+	registerDelegationHandlers(d)
 }
 
 // ---------------------------------------------------------------------------
