@@ -73,3 +73,35 @@ func TestFindKingdomSocket_CurrentDir(t *testing.T) {
 		t.Errorf("root: got %q, want %q", gotRoot, root)
 	}
 }
+
+func TestFindAllKingdomSockets_MultipleKingdoms(t *testing.T) {
+	// Two kingdoms: one in child dir, one in parent dir
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(filepath.Join(child, ".king"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(parent, ".king"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	childSock := filepath.Join(child, ".king", "king-aaaaaaaa.sock")
+	parentSock := filepath.Join(parent, ".king", "king-bbbbbbbb.sock")
+	_ = os.WriteFile(childSock, nil, 0o600)
+	_ = os.WriteFile(parentSock, nil, 0o600)
+
+	kingdoms, err := discovery.FindAllKingdomSockets(child)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(kingdoms) != 2 {
+		t.Fatalf("expected 2 kingdoms, got %d: %v", len(kingdoms), kingdoms)
+	}
+}
+
+func TestFindAllKingdomSockets_None(t *testing.T) {
+	root := t.TempDir()
+	kingdoms, err := discovery.FindAllKingdomSockets(root)
+	if err != discovery.ErrNoKingdom {
+		t.Errorf("expected ErrNoKingdom, got err=%v kingdoms=%v", err, kingdoms)
+	}
+}
