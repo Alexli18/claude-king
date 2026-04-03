@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"syscall"
 	"time"
 
@@ -317,7 +318,14 @@ func cmdList() {
 		return
 	}
 
-	for path, e := range entries {
+	paths := make([]string, 0, len(entries))
+	for path := range entries {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		e := entries[path]
 		status := "running"
 		if !e.Reachable {
 			status = "unreachable"
@@ -332,11 +340,11 @@ func cmdList() {
 		// Query vassals from the daemon.
 		client, err := daemon.NewClient(path)
 		if err != nil {
-			fmt.Println("  vassals: (could not connect)")
+			fmt.Println("  vassals: (none)")
 			continue
 		}
+		defer client.Close()
 		raw, err := client.Call("vassal.list", nil)
-		client.Close()
 		if err != nil {
 			fmt.Println("  vassals: (none)")
 			continue
