@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -121,8 +122,17 @@ func Validate(cfg *KingdomConfig) error {
 		if v.Command == "" && v.Type != "serial" {
 			return fmt.Errorf("vassal %q: command must not be empty", v.Name)
 		}
-		if v.Type == "serial" && v.SerialPort == "" {
-			return fmt.Errorf("vassal %q: serial_port must not be empty for type:serial", v.Name)
+		if v.Type == "serial" {
+			if v.SerialPort == "" {
+				return fmt.Errorf("vassal %q: serial_port must not be empty for type:serial", v.Name)
+			}
+			if strings.HasPrefix(v.SerialPort, "auto:") {
+				hint := strings.TrimPrefix(v.SerialPort, "auto:")
+				validHints := map[string]bool{"esp32": true, "ftdi": true, "gps": true, "any": true}
+				if !validHints[hint] {
+					return fmt.Errorf("vassal %q: unknown serial auto-detect hint %q (valid: esp32, ftdi, gps, any)", v.Name, hint)
+				}
+			}
 		}
 		if _, exists := vassalNames[v.Name]; exists {
 			return fmt.Errorf("duplicate vassal name: %q", v.Name)

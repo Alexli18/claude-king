@@ -9,6 +9,42 @@ import (
 	"github.com/alexli18/claude-king/internal/config"
 )
 
+func TestValidate_AcceptsAutoSerialPort(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Vassals: []config.VassalConfig{
+			{Name: "fw", Type: "serial", SerialPort: "auto:esp32"},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("expected no error for auto:esp32, got: %v", err)
+	}
+}
+
+func TestValidate_AcceptsAutoAny(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Vassals: []config.VassalConfig{
+			{Name: "gps", Type: "serial", SerialPort: "auto:any"},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("expected no error for auto:any, got: %v", err)
+	}
+}
+
+func TestValidate_RejectsUnknownAutoHint(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Vassals: []config.VassalConfig{
+			{Name: "fw", Type: "serial", SerialPort: "auto:unknown"},
+		},
+	}
+	if err := config.Validate(cfg); err == nil {
+		t.Error("expected error for auto:unknown, got nil")
+	}
+}
+
 func TestLoadOrCreateConfig_WritesEmptyVassals(t *testing.T) {
 	rootDir := t.TempDir()
 

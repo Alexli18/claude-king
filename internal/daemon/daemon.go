@@ -23,6 +23,7 @@ import (
 	"github.com/alexli18/claude-king/internal/artifacts"
 	"github.com/alexli18/claude-king/internal/audit"
 	"github.com/alexli18/claude-king/internal/config"
+	"github.com/alexli18/claude-king/internal/discovery"
 	"github.com/alexli18/claude-king/internal/events"
 	"github.com/alexli18/claude-king/internal/fingerprint"
 	"github.com/alexli18/claude-king/internal/mcp"
@@ -442,6 +443,19 @@ func (d *Daemon) startVassals() error {
 		}
 		if cwd == "" {
 			cwd = d.rootDir
+		}
+
+		// Resolve auto-detect serial port.
+		if strings.HasPrefix(vc.SerialPort, "auto:") {
+			hint := strings.TrimPrefix(vc.SerialPort, "auto:")
+			resolved, err := discovery.FindSerialPort(hint)
+			if err != nil {
+				d.logger.Warn("serial autodetect failed, skipping vassal",
+					"name", vc.Name, "hint", hint, "err", err)
+				continue
+			}
+			d.logger.Info("serial port resolved", "name", vc.Name, "hint", hint, "port", resolved)
+			vc.SerialPort = resolved
 		}
 
 		id := uuid.New().String()
