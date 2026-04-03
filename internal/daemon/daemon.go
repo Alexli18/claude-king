@@ -37,6 +37,11 @@ const (
 	dbFileName = "king.db"
 )
 
+const (
+	vassalRestartInitialBackoff = 1 * time.Second
+	vassalRestartMaxBackoff     = 60 * time.Second
+)
+
 // SocketPathForRoot returns a unique socket path based on the root directory hash.
 // This prevents collisions when multiple Kingdoms run in different directories.
 func SocketPathForRoot(rootDir string) string {
@@ -92,9 +97,8 @@ type ExternalVassalInfo struct {
 
 // vassalProc holds runtime state for a running claude vassal subprocess.
 type vassalProc struct {
-	process       *os.Process
-	pgid          int
-	restartPolicy string
+	process *os.Process
+	pgid    int
 }
 
 // Daemon manages the lifecycle of a Kingdom daemon process, including the
@@ -119,6 +123,7 @@ type Daemon struct {
 	wg            sync.WaitGroup
 	vassalPool        *VassalClientPool
 	vassalProcs       map[string]*vassalProc // name → running king-vassal process
+	vassalProcsMu     sync.RWMutex
 	externalVassals   map[string]ExternalVassalInfo
 	externalVassalsMu sync.RWMutex
 }
@@ -517,18 +522,26 @@ func (d *Daemon) startVassals() error {
 	return nil
 }
 
-// startClaudeVassal launches a king-vassal subprocess for a claude-type vassal,
-// waits for its socket to appear, and connects to it via the VassalClientPool.
-func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
+// NextBackoff returns the next exponential backoff duration, capped at vassalRestartMaxBackoff.
+func NextBackoff(current time.Duration) time.Duration {
+	next := current * 2
+	if next > vassalRestartMaxBackoff {
+		return vassalRestartMaxBackoff
+	}
+	return next
+}
+
+// launchClaudeVassal starts a king-vassal subprocess, waits for its socket,
+// connects the vassal pool client, and returns the running cmd.
+func (d *Daemon) launchClaudeVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	exe, err := resolveKingVassalBinary()
 	if err != nil {
-		return fmt.Errorf("resolve king-vassal binary: %w", err)
+		return nil, fmt.Errorf("resolve king-vassal binary: %w", err)
 	}
 
 	kingDir := filepath.Join(d.rootDir, kingDirName)
 	sockPath := filepath.Join(kingDir, "vassals", v.Name+".sock")
 
-	// Auto-Integrity: inject contracts based on project type.
 	if v.RepoPath != "" {
 		repoPath := v.RepoPath
 		if !filepath.IsAbs(repoPath) {
@@ -544,43 +557,117 @@ func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
 		"--king-sock", d.sockPath,
 		"--timeout", "10",
 	)
-	cmd.Stdout = os.Stderr // log to stderr for now
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start king-vassal %q: %w", v.Name, err)
+		return nil, fmt.Errorf("start king-vassal %q: %w", v.Name, err)
 	}
 
-	// Wait for socket to appear (up to 3s).
-	for i := 0; i < 30; i++ {
+	deadline := time.Now().Add(3 * time.Second)
+	for {
 		if _, err := os.Stat(sockPath); err == nil {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
-		if i == 29 {
+		if time.Now().After(deadline) {
 			cmd.Process.Kill()
-			return fmt.Errorf("king-vassal %q did not start within 3s", v.Name)
+			return nil, fmt.Errorf("king-vassal %q did not start within 3s", v.Name)
+		}
+		select {
+		case <-d.ctx.Done():
+			cmd.Process.Kill()
+			return nil, fmt.Errorf("king-vassal %q: context cancelled", v.Name)
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 
-	// Connect client.
 	if _, err := d.vassalPool.Connect(v.Name, sockPath); err != nil {
 		cmd.Process.Kill()
-		return fmt.Errorf("connect to king-vassal %q: %w", v.Name, err)
+		return nil, fmt.Errorf("connect to king-vassal %q: %w", v.Name, err)
+	}
+
+	return cmd, nil
+}
+
+// startClaudeVassal launches a vassal and starts the watch/restart goroutine.
+func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
+	cmd, err := d.launchClaudeVassal(v)
+	if err != nil {
+		return err
 	}
 
 	pgid, err := syscall.Getpgid(cmd.Process.Pid)
 	if err != nil {
 		d.logger.Warn("could not get vassal pgid, process group kill unavailable", "name", v.Name, "err", err)
 	}
+	d.vassalProcsMu.Lock()
 	d.vassalProcs[v.Name] = &vassalProc{
-		process:       cmd.Process,
-		pgid:          pgid,
-		restartPolicy: v.RestartPolicy,
+		process: cmd.Process,
+		pgid:    pgid,
 	}
-	d.logger.Info("claude vassal started", "name", v.Name, "sock", sockPath)
+	d.vassalProcsMu.Unlock()
+
+	d.wg.Add(1)
+	go d.watchVassal(v.Name, cmd, v)
+
+	d.logger.Info("claude vassal started", "name", v.Name)
 	return nil
+}
+
+// watchVassal waits for a vassal process to exit and restarts it with
+// exponential backoff unless the daemon is shutting down or restart_policy is "no".
+func (d *Daemon) watchVassal(name string, cmd *exec.Cmd, cfg config.VassalConfig) {
+	defer d.wg.Done()
+
+	backoff := vassalRestartInitialBackoff
+
+	for {
+		_ = cmd.Wait()
+
+		if d.ctx.Err() != nil {
+			return
+		}
+
+		policy := cfg.RestartPolicy
+		if policy == "" {
+			policy = "always"
+		}
+		if policy == "no" {
+			d.logger.Info("vassal exited, restart disabled", "name", name)
+			return
+		}
+
+		d.logger.Info("vassal exited, restarting", "name", name, "backoff", backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-d.ctx.Done():
+			return
+		}
+
+		backoff = NextBackoff(backoff)
+
+		newCmd, err := d.launchClaudeVassal(cfg)
+		if err != nil {
+			d.logger.Error("failed to restart vassal", "name", name, "err", err)
+			continue
+		}
+		// Reset backoff on successful launch
+		backoff = vassalRestartInitialBackoff
+
+		pgid, err := syscall.Getpgid(newCmd.Process.Pid)
+		if err != nil {
+			d.logger.Warn("could not get vassal pgid after restart", "name", name, "err", err)
+		}
+		d.vassalProcsMu.Lock()
+		d.vassalProcs[name] = &vassalProc{
+			process: newCmd.Process,
+			pgid:    pgid,
+		}
+		d.vassalProcsMu.Unlock()
+		cmd = newCmd
+	}
 }
 
 // resolveKingVassalBinary finds the king-vassal binary by checking PATH first,
@@ -668,8 +755,17 @@ func (d *Daemon) Stop() error {
 	if d.vassalPool != nil {
 		d.vassalPool.DisconnectAll()
 	}
+	d.vassalProcsMu.RLock()
+	vassalSnapshot := make([]*vassalProc, 0, len(d.vassalProcs))
+	vassalNames := make([]string, 0, len(d.vassalProcs))
 	for name, vp := range d.vassalProcs {
-		d.logger.Info("stopping claude vassal", "name", name)
+		vassalSnapshot = append(vassalSnapshot, vp)
+		vassalNames = append(vassalNames, name)
+	}
+	d.vassalProcsMu.RUnlock()
+
+	for i, vp := range vassalSnapshot {
+		d.logger.Info("stopping claude vassal", "name", vassalNames[i])
 		if vp.pgid > 0 {
 			_ = syscall.Kill(-vp.pgid, syscall.SIGTERM)
 		} else {
@@ -677,10 +773,10 @@ func (d *Daemon) Stop() error {
 		}
 	}
 	// Wait up to 3s for all vassals to exit, then SIGKILL survivors.
-	if len(d.vassalProcs) > 0 {
+	if len(vassalSnapshot) > 0 {
 		deadline := time.After(3 * time.Second)
 		<-deadline
-		for _, vp := range d.vassalProcs {
+		for _, vp := range vassalSnapshot {
 			if vp.pgid > 0 {
 				_ = syscall.Kill(-vp.pgid, syscall.SIGKILL)
 			} else {

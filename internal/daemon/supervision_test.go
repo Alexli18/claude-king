@@ -7,7 +7,27 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/alexli18/claude-king/internal/daemon"
 )
+
+func TestNextBackoff(t *testing.T) {
+	tests := []struct {
+		current  time.Duration
+		expected time.Duration
+	}{
+		{1 * time.Second, 2 * time.Second},
+		{2 * time.Second, 4 * time.Second},
+		{32 * time.Second, 60 * time.Second}, // capped at 60s
+		{60 * time.Second, 60 * time.Second}, // stays at max
+	}
+	for _, tt := range tests {
+		got := daemon.NextBackoff(tt.current)
+		if got != tt.expected {
+			t.Errorf("nextBackoff(%v) = %v, want %v", tt.current, got, tt.expected)
+		}
+	}
+}
 
 // TestPGIDKillsProcessGroup verifies that killing a process group (negative PID)
 // kills the group leader and all children, not just the leader.
