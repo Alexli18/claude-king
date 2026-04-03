@@ -90,6 +90,13 @@ type ExternalVassalInfo struct {
 	PID      int    `json:"pid"`
 }
 
+// vassalProc holds runtime state for a running claude vassal subprocess.
+type vassalProc struct {
+	process       *os.Process
+	pgid          int
+	restartPolicy string
+}
+
 // Daemon manages the lifecycle of a Kingdom daemon process, including the
 // UDS server, store, config, and PID file.
 type Daemon struct {
@@ -111,7 +118,7 @@ type Daemon struct {
 	handlers      map[string]rpcHandler
 	wg            sync.WaitGroup
 	vassalPool        *VassalClientPool
-	vassalProcs       map[string]*os.Process // name → running king-vassal process
+	vassalProcs       map[string]*vassalProc // name → running king-vassal process
 	externalVassals   map[string]ExternalVassalInfo
 	externalVassalsMu sync.RWMutex
 }
@@ -137,7 +144,7 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 		sockPath:    SocketPathForRoot(absRoot),
 		logger:      logger,
 		handlers:        make(map[string]rpcHandler),
-		vassalProcs:     make(map[string]*os.Process),
+		vassalProcs:     make(map[string]*vassalProc),
 		externalVassals: make(map[string]ExternalVassalInfo),
 	}
 
@@ -539,6 +546,7 @@ func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
 	)
 	cmd.Stdout = os.Stderr // log to stderr for now
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start king-vassal %q: %w", v.Name, err)
@@ -562,7 +570,15 @@ func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
 		return fmt.Errorf("connect to king-vassal %q: %w", v.Name, err)
 	}
 
-	d.vassalProcs[v.Name] = cmd.Process
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err != nil {
+		d.logger.Warn("could not get vassal pgid, process group kill unavailable", "name", v.Name, "err", err)
+	}
+	d.vassalProcs[v.Name] = &vassalProc{
+		process:       cmd.Process,
+		pgid:          pgid,
+		restartPolicy: v.RestartPolicy,
+	}
 	d.logger.Info("claude vassal started", "name", v.Name, "sock", sockPath)
 	return nil
 }
@@ -652,9 +668,25 @@ func (d *Daemon) Stop() error {
 	if d.vassalPool != nil {
 		d.vassalPool.DisconnectAll()
 	}
-	for name, proc := range d.vassalProcs {
+	for name, vp := range d.vassalProcs {
 		d.logger.Info("stopping claude vassal", "name", name)
-		_ = proc.Signal(syscall.SIGTERM)
+		if vp.pgid > 0 {
+			_ = syscall.Kill(-vp.pgid, syscall.SIGTERM)
+		} else {
+			_ = vp.process.Signal(syscall.SIGTERM)
+		}
+	}
+	// Wait up to 3s for all vassals to exit, then SIGKILL survivors.
+	if len(d.vassalProcs) > 0 {
+		deadline := time.After(3 * time.Second)
+		<-deadline
+		for _, vp := range d.vassalProcs {
+			if vp.pgid > 0 {
+				_ = syscall.Kill(-vp.pgid, syscall.SIGKILL)
+			} else {
+				_ = vp.process.Kill()
+			}
+		}
 	}
 
 	// Close the listener to unblock acceptLoop.
