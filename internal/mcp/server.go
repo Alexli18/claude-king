@@ -80,6 +80,7 @@ type VassalCaller interface {
 // an import cycle between mcp and daemon packages.
 type VassalPool interface {
 	Get(name string) (VassalCaller, bool)
+	Names() []string
 }
 
 // Server wraps the mcp-go MCPServer and holds references to internal services
@@ -193,7 +194,7 @@ func (s *Server) registerListVassals() {
 // registerExecIn registers a stub for the exec_in tool (Phase 4).
 func (s *Server) registerExecIn() {
 	tool := mcp.NewTool("exec_in",
-		mcp.WithDescription("Execute a command inside a vassal's PTY session"),
+		mcp.WithDescription("Execute a command inside a vassal's PTY session. NOTE: only works for process vassals (type: command/serial). For claude vassals use dispatch_task instead."),
 		mcp.WithString("vassal",
 			mcp.Required(),
 			mcp.Description("Name of the vassal to execute in"),
