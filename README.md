@@ -1,3 +1,13 @@
+# Claude King
+
+Run multiple Claude Code agents in parallel across your repos.
+One MCP daemon to coordinate them all.
+
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
+[![CI](https://github.com/alexli18/claude-king/actions/workflows/ci.yml/badge.svg)](https://github.com/alexli18/claude-king/actions)
+
 ```
          ╔═══╗
         ╔╝ ♔ ╚╗         C L A U D E   K I N G
@@ -11,10 +21,6 @@
 
 > *In a world where Claude and Cursor write your code —*
 > *King is the one who answers for it.*
-
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/Protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 
 ---
 
@@ -277,7 +283,8 @@ You rule.
 - [x] **Phase 3** — Semantic Sieve, event filtering, Royal Audit
 - [x] **Phase 3.5** — Zero-config onboarding, Secret Scanner, Auto-Integrity
 - [x] **Phase 3.6** — Serial vassal (ESP32/NMEA/AT), `get_serial_events` MCP tool, `king list` P2P registry
-- [ ] **Phase 4** — TUI dashboard (`king tui`), event webhooks, Vector memory
+- [x] **Phase 4** — TUI dashboard (`king tui`)
+- [ ] **Phase 5** — Event webhooks, Vector memory
 
 ---
 
