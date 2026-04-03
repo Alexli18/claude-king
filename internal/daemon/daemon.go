@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -80,6 +81,15 @@ type rpcHandler func(params json.RawMessage) (interface{}, error)
 // Daemon
 // ---------------------------------------------------------------------------
 
+// ExternalVassalInfo holds metadata about a vassal registered via vassal.register RPC.
+// Used for vassals started externally (e.g. via --stdio mode).
+type ExternalVassalInfo struct {
+	Name     string `json:"name"`
+	RepoPath string `json:"repo_path"`
+	Socket   string `json:"socket"`
+	PID      int    `json:"pid"`
+}
+
 // Daemon manages the lifecycle of a Kingdom daemon process, including the
 // UDS server, store, config, and PID file.
 type Daemon struct {
@@ -100,8 +110,10 @@ type Daemon struct {
 	logger        *slog.Logger
 	handlers      map[string]rpcHandler
 	wg            sync.WaitGroup
-	vassalPool    *VassalClientPool
-	vassalProcs   map[string]*os.Process // name → running king-vassal process
+	vassalPool        *VassalClientPool
+	vassalProcs       map[string]*os.Process // name → running king-vassal process
+	externalVassals   map[string]ExternalVassalInfo
+	externalVassalsMu sync.RWMutex
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -124,8 +136,9 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 		pidFile:     pidPathForRoot(absRoot),
 		sockPath:    SocketPathForRoot(absRoot),
 		logger:      logger,
-		handlers:    make(map[string]rpcHandler),
-		vassalProcs: make(map[string]*os.Process),
+		handlers:        make(map[string]rpcHandler),
+		vassalProcs:     make(map[string]*os.Process),
+		externalVassals: make(map[string]ExternalVassalInfo),
 	}
 
 	d.vassalPool = NewVassalClientPool()
@@ -742,6 +755,12 @@ func (d *Daemon) acceptLoop() {
 	}
 }
 
+// ServeConn handles a single daemon RPC connection. Exported for testing.
+func (d *Daemon) ServeConn(conn net.Conn) {
+	d.wg.Add(1)
+	d.handleConnection(conn)
+}
+
 func (d *Daemon) handleConnection(conn net.Conn) {
 	defer d.wg.Done()
 	defer conn.Close()
@@ -1328,6 +1347,7 @@ func (d *Daemon) registerRealHandlers() {
 		}
 		return map[string]string{"status": "shutting_down"}, nil
 	}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,6 +1368,68 @@ func (d *Daemon) registerStubHandlers() {
 		d.handlers[method] = func(_ json.RawMessage) (interface{}, error) {
 			return map[string]interface{}{}, nil
 		}
+	}
+
+	// vassal.register and vassal.list are available even before full daemon start
+	// because they only depend on externalVassals which is initialised in NewDaemon.
+	d.handlers["vassal.register"] = func(params json.RawMessage) (interface{}, error) {
+		var info ExternalVassalInfo
+		if err := json.Unmarshal(params, &info); err != nil {
+			return nil, fmt.Errorf("invalid params: %w", err)
+		}
+		if info.Name == "" {
+			return nil, fmt.Errorf("name is required")
+		}
+		if info.PID <= 0 {
+			return nil, fmt.Errorf("pid must be positive")
+		}
+		// Reject control characters and ANSI escapes that could inject terminal sequences.
+		for _, field := range []string{info.Socket, info.RepoPath} {
+			for _, r := range field {
+				if r < 0x20 || r == 0x7f {
+					return nil, fmt.Errorf("invalid characters in socket or repo_path")
+				}
+			}
+		}
+		d.externalVassalsMu.Lock()
+		d.externalVassals[info.Name] = info
+		d.externalVassalsMu.Unlock()
+		d.logger.Info("external vassal registered", "name", info.Name, "repo", info.RepoPath)
+		return map[string]bool{"ok": true}, nil
+	}
+
+	d.handlers["vassal.list"] = func(_ json.RawMessage) (interface{}, error) {
+		// Snapshot the map under read lock.
+		d.externalVassalsMu.RLock()
+		snapshot := make([]ExternalVassalInfo, 0, len(d.externalVassals))
+		for _, v := range d.externalVassals {
+			snapshot = append(snapshot, v)
+		}
+		d.externalVassalsMu.RUnlock()
+
+		// Perform liveness checks outside the lock.
+		type vassalEntry struct {
+			Name     string `json:"name"`
+			RepoPath string `json:"repo_path"`
+			Socket   string `json:"socket"`
+			PID      int    `json:"pid"`
+			Alive    bool   `json:"alive"`
+		}
+		result := make([]vassalEntry, 0, len(snapshot))
+		for _, v := range snapshot {
+			alive := false
+			if v.PID > 0 {
+				if proc, err := os.FindProcess(v.PID); err == nil {
+					alive = proc.Signal(syscall.Signal(0)) == nil
+				}
+			}
+			result = append(result, vassalEntry{
+				Name: v.Name, RepoPath: v.RepoPath,
+				Socket: v.Socket, PID: v.PID, Alive: alive,
+			})
+		}
+		sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+		return map[string]interface{}{"vassals": result}, nil
 	}
 
 	// status returns the current kingdom state.

@@ -78,18 +78,33 @@ func LoadOrCreateConfig(rootDir string) (*KingdomConfig, error) {
 	}
 
 	dirName := filepath.Base(rootDir)
-	cfg := DefaultConfig(dirName)
+	tmpl := "name: " + dirName + `
+vassals: []
+# Example vassal:
+# vassals:
+#   - name: shell
+#     command: $SHELL
+#     autostart: true
+patterns:
+  - name: generic-error
+    regex: '(?i)error|FAIL|panic:'
+    severity: error
+    summary_template: "Error detected in {vassal}: {match}"
+settings:
+  log_retention_days: 7
+  max_output_buffer: 10MB
+  event_cooldown_seconds: 30
+  audit_retention_days: 7
+  audit_ingestion_retention_days: 1
+  sovereign_approval_timeout: 300
+  audit_max_trace_output: 10000
+`
 
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("marshalling default config: %w", err)
-	}
-
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(tmpl), 0644); err != nil {
 		return nil, fmt.Errorf("writing default config: %w", err)
 	}
 
-	return cfg, nil
+	return LoadConfig(configPath)
 }
 
 // Validate checks the config for consistency errors.
@@ -131,16 +146,9 @@ func Validate(cfg *KingdomConfig) error {
 
 // DefaultConfig creates a minimal default config for the given directory name.
 func DefaultConfig(dirName string) *KingdomConfig {
-	autostart := true
 	return &KingdomConfig{
-		Name: dirName,
-		Vassals: []VassalConfig{
-			{
-				Name:      "shell",
-				Command:   "$SHELL",
-				Autostart: &autostart,
-			},
-		},
+		Name:    dirName,
+		Vassals: []VassalConfig{},
 		Patterns: []PatternConfig{
 			{
 				Name:            "generic-error",

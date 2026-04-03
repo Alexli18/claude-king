@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/alexli18/claude-king/internal/daemon"
 	"github.com/alexli18/claude-king/internal/discovery"
 	"github.com/alexli18/claude-king/internal/fingerprint"
 	"github.com/alexli18/claude-king/internal/vassal"
@@ -37,13 +38,41 @@ func main() {
 	if *name == "" {
 		*name = filepath.Base(*repoPath)
 	}
-	if !*stdio && *kingSocket == "" {
-		sockPath, _, discErr := discovery.FindKingdomSocket(cwd)
+	if *kingSocket == "" {
+		kingdoms, discErr := discovery.FindAllKingdomSockets(cwd)
 		if discErr != nil {
-			fmt.Fprintln(os.Stderr, "error: No Kingdom found. Run king-daemon init first.")
+			fmt.Fprintln(os.Stderr, "error: No Kingdom found. Run king up first.")
 			os.Exit(1)
 		}
-		*kingSocket = sockPath
+		switch len(kingdoms) {
+		case 1:
+			*kingSocket = kingdoms[0].SocketPath
+		default:
+			if *stdio {
+				fmt.Fprintf(os.Stderr, "error: multiple kingdoms found, use --king-sock to specify one\n")
+				for _, k := range kingdoms {
+					fmt.Fprintf(os.Stderr, "  %s (%s)\n", k.Name, k.RootDir)
+				}
+				os.Exit(1)
+			}
+			// Interactive selection — only available when stdin is a terminal.
+			fi, _ := os.Stdin.Stat()
+			if (fi.Mode() & os.ModeCharDevice) == 0 {
+				fmt.Fprintln(os.Stderr, "error: multiple kingdoms found but stdin is not a terminal, use --king-sock")
+				os.Exit(1)
+			}
+			fmt.Println("Found multiple kingdoms:")
+			for i, k := range kingdoms {
+				fmt.Printf("  %d. %-20s (%s)\n", i+1, k.Name, k.RootDir)
+			}
+			fmt.Printf("\nSelect kingdom [1-%d]: ", len(kingdoms))
+			var choice int
+			if _, err := fmt.Scan(&choice); err != nil || choice < 1 || choice > len(kingdoms) {
+				fmt.Fprintln(os.Stderr, "error: invalid selection")
+				os.Exit(1)
+			}
+			*kingSocket = kingdoms[choice-1].SocketPath
+		}
 	}
 
 	// Fingerprint the project and log the type (used by daemon for Auto-Integrity).
@@ -56,6 +85,19 @@ func main() {
 	)
 
 	srv := vassal.NewVassalServer(*name, *repoPath, *kingDir, *kingSocket, *timeoutMin, logger)
+
+	// Register with King daemon (best-effort, non-fatal).
+	if *kingSocket != "" {
+		if client, err := daemon.NewClientFromSocket(*kingSocket); err == nil {
+			_, _ = client.Call("vassal.register", map[string]interface{}{
+				"name":      *name,
+				"repo_path": *repoPath,
+				"socket":    filepath.Join(*kingDir, "vassals", *name+".sock"),
+				"pid":       os.Getpid(),
+			})
+			client.Close()
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

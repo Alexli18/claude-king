@@ -36,6 +36,17 @@ func NewClient(rootDir string) (*Client, error) {
 	return &Client{conn: conn, scanner: scanner}, nil
 }
 
+// NewClientFromSocket connects to a daemon via a known socket path.
+func NewClientFromSocket(sockPath string) (*Client, error) {
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return nil, fmt.Errorf("connect to daemon socket: %w", err)
+	}
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	return &Client{conn: conn, scanner: scanner}, nil
+}
+
 // Call sends a JSON-RPC request and waits for the response.
 func (c *Client) Call(method string, params interface{}) (json.RawMessage, error) {
 	id := int(c.nextID.Add(1))
