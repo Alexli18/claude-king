@@ -198,6 +198,39 @@ When the circuit opens, `delegate_control` is rejected with a clear error. When 
 
 ---
 
+## Security and Hardening
+
+Claude King is designed to reduce a specific set of risks that emerge when AI coding agents operate autonomously across multiple repositories:
+
+- **Secret leakage via artifacts:** every file submitted to the Ledger is scanned for AWS credentials, GitHub tokens, private keys, and sensitive filenames before storage (`internal/security/scanner.go`).
+- **Uncontrolled command execution:** `exec_in` supports a sovereign approval gate (`internal/daemon/daemon.go`) that blocks execution until a Sovereign explicitly authorizes the command.
+- **Unhealthy agent escalation:** the guard circuit breaker (`internal/daemon/delegation_handlers.go`) blocks `delegate_control` when a vassal's health checks are failing.
+- **Auditability:** all commands, artifacts, and events are stored in SQLite at `.king/king.db`, providing a replay-capable audit trail.
+
+**What King does not currently guarantee:**
+- Sandboxed or containerized command execution
+- Network isolation between vassal processes
+- Secret scanning of `exec_in` output, event payloads, or task descriptions
+- OS-level privilege separation between the daemon and vassals
+
+For a full threat model and planned hardening roadmap, see [`security-research/`](security-research/) and [`docs/secure-bash-roadmap.md`](docs/secure-bash-roadmap.md).
+
+---
+
+## Threat Model (Initial)
+
+| Threat | Current mitigation | Gap |
+|--------|-------------------|-----|
+| **Command injection via exec_in** | Optional sovereign approval gate (`internal/daemon/daemon.go`) | Not enforced by default; no command denylist |
+| **Secret leakage via artifacts** | Regex scanner on Ledger writes (`internal/security/scanner.go`) | exec_in output, event payloads not scanned |
+| **Unsafe artifact storage** | Secret scanner blocks before SQLite write | No encryption at rest; SQLite is world-readable |
+| **Weak approval coverage** | exec_in gated when sovereign_approval configured | dispatch_task, register_artifact have no approval gate |
+| **Local trust-boundary assumptions** | Daemon runs with user's OS privileges | No isolation between King daemon and vassal processes |
+
+See [`security-research/`](security-research/) for detailed analysis of each threat.
+
+---
+
 ## Security
 
 Every artifact submitted to King's Ledger is scanned before storage:
