@@ -1,4 +1,4 @@
-.PHONY: build test vet clean install install-user uninstall uninstall-user
+.PHONY: build test vet fmt clean install install-user uninstall uninstall-user
 
 BINDIR ?= .
 SYSTEM_BINDIR = /usr/local/bin
@@ -21,7 +21,7 @@ install-user: build
 	@if ! echo "$$PATH" | tr ':' '\n' | grep -qx "$(USER_BINDIR)"; then \
 		for rc in "$(HOME)/.zshrc" "$(HOME)/.bashrc"; do \
 			if [ -f "$$rc" ]; then \
-				echo 'export PATH="$$HOME/.local/bin:$$PATH"' >> "$$rc"; \
+				echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$$rc"; \
 				echo "Added $(USER_BINDIR) to PATH in $$rc"; \
 			fi; \
 		done; \
@@ -44,6 +44,9 @@ test:
 
 vet:
 	go vet ./...
+
+fmt:
+	gofmt -w .
 
 clean:
 	rm -f king king-vassal kingctl

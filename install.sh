@@ -37,9 +37,11 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
   PATCHED=0
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
     if [ -f "$RC" ]; then
-      echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$RC"
-      echo "Added $INSTALL_DIR to PATH in $RC"
-      PATCHED=1
+      if ! grep -qF "$INSTALL_DIR" "$RC"; then
+        echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$RC"
+        echo "Added $INSTALL_DIR to PATH in $RC"
+        PATCHED=1
+      fi
     fi
   done
   if [ "$PATCHED" -eq 0 ]; then

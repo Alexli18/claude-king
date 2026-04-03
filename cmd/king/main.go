@@ -619,11 +619,17 @@ func cmdDoctor() {
 		if responds {
 			client.Close()
 		}
+	} else {
+		check("daemon responds to connections", false, "start the daemon first with 'king up'")
 	}
 
 	// 5. king-vassal in PATH
 	_, kvErr := exec.LookPath("king-vassal")
 	check("king-vassal binary in PATH", kvErr == nil, "run 'make install' or 'make install-user' to install binaries")
+
+	// 6. kingctl in PATH
+	_, kctlErr := exec.LookPath("kingctl")
+	check("kingctl binary in PATH", kctlErr == nil, "run 'make install' or 'make install-user' to install binaries")
 
 	fmt.Println()
 	if allOK {
