@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,42 @@ var validSeverities = map[string]bool{
 	"warning":  true,
 	"error":    true,
 	"critical": true,
+}
+
+// validGuardTypes defines the allowed guard type identifiers.
+var validGuardTypes = map[string]bool{
+	"port_check":   true,
+	"log_watch":    true,
+	"data_rate":    true,
+	"health_check": true,
+}
+
+// parseMinBytesPerSec converts a human-readable rate string (e.g. "100bps",
+// "1.5kbps", "2mbps") to a float64 bytes-per-second value.
+func parseMinBytesPerSec(min string) (float64, error) {
+	lower := strings.ToLower(strings.TrimSpace(min))
+	switch {
+	case strings.HasSuffix(lower, "mbps"):
+		v, err := strconv.ParseFloat(strings.TrimSuffix(lower, "mbps"), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid min value %q", min)
+		}
+		return v * 1024 * 1024, nil
+	case strings.HasSuffix(lower, "kbps"):
+		v, err := strconv.ParseFloat(strings.TrimSuffix(lower, "kbps"), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid min value %q", min)
+		}
+		return v * 1024, nil
+	case strings.HasSuffix(lower, "bps"):
+		v, err := strconv.ParseFloat(strings.TrimSuffix(lower, "bps"), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid min value %q", min)
+		}
+		return v, nil
+	default:
+		return 0, fmt.Errorf("invalid min format %q: must end in bps, kbps, or mbps", min)
+	}
 }
 
 // LoadConfig loads kingdom config from the given path.
@@ -81,11 +118,30 @@ func LoadOrCreateConfig(rootDir string) (*KingdomConfig, error) {
 	dirName := filepath.Base(rootDir)
 	tmpl := "name: " + dirName + `
 vassals: []
-# Example vassal:
+# Example vassal with guards:
 # vassals:
-#   - name: shell
-#     command: $SHELL
+#   - name: api
+#     command: ./api-server
 #     autostart: true
+#     guards:
+#       - type: port_check
+#         port: 8080
+#         expect: open
+#         interval: 10
+#         threshold: 3
+#       - type: log_watch
+#         fail_on:
+#           - "CRITICAL"
+#           - "panic:"
+#         interval: 5
+#       - type: data_rate
+#         min: 100bps
+#         interval: 10
+#         threshold: 3
+#       - type: health_check
+#         exec: ./scripts/health.sh
+#         timeout: 10
+#         threshold: 3
 patterns:
   - name: generic-error
     regex: '(?i)error|FAIL|panic:'
@@ -138,6 +194,65 @@ func Validate(cfg *KingdomConfig) error {
 			return fmt.Errorf("duplicate vassal name: %q", v.Name)
 		}
 		vassalNames[v.Name] = struct{}{}
+
+		// Validate guards
+		for j, gc := range v.Guards {
+			if !validGuardTypes[gc.Type] {
+				return fmt.Errorf("vassal %q: guard at index %d: invalid type %q (must be port_check, log_watch, data_rate, or health_check)", v.Name, j, gc.Type)
+			}
+			interval := gc.Interval
+			if interval == 0 {
+				interval = 10
+			}
+			if interval < 1 {
+				return fmt.Errorf("vassal %q: guard at index %d: interval must be >= 1 second", v.Name, j)
+			}
+			threshold := gc.Threshold
+			if threshold == 0 {
+				threshold = 3
+			}
+			if threshold < 1 {
+				return fmt.Errorf("vassal %q: guard at index %d: threshold must be >= 1", v.Name, j)
+			}
+			switch gc.Type {
+			case "port_check":
+				if gc.Port < 1 || gc.Port > 65535 {
+					return fmt.Errorf("vassal %q: guard at index %d (port_check): port must be 1–65535", v.Name, j)
+				}
+				if gc.Expect != "" && gc.Expect != "open" && gc.Expect != "closed" {
+					return fmt.Errorf("vassal %q: guard at index %d (port_check): expect must be 'open' or 'closed'", v.Name, j)
+				}
+			case "log_watch":
+				if len(gc.FailOn) == 0 {
+					return fmt.Errorf("vassal %q: guard at index %d (log_watch): fail_on must not be empty", v.Name, j)
+				}
+				patterns := make([]*regexp.Regexp, 0, len(gc.FailOn))
+				for _, pattern := range gc.FailOn {
+					re, err := regexp.Compile(pattern)
+					if err != nil {
+						return fmt.Errorf("vassal %q: guard at index %d (log_watch): invalid fail_on pattern %q: %w", v.Name, j, pattern, err)
+					}
+					patterns = append(patterns, re)
+				}
+				cfg.Vassals[i].Guards[j].CompiledPatterns = patterns
+			case "data_rate":
+				if gc.Min == "" {
+					return fmt.Errorf("vassal %q: guard at index %d (data_rate): min must not be empty", v.Name, j)
+				}
+				minRate, err := parseMinBytesPerSec(gc.Min)
+				if err != nil {
+					return fmt.Errorf("vassal %q: guard at index %d (data_rate): %w", v.Name, j, err)
+				}
+				cfg.Vassals[i].Guards[j].MinBytesPerSec = minRate
+			case "health_check":
+				if gc.Exec == "" {
+					return fmt.Errorf("vassal %q: guard at index %d (health_check): exec must not be empty", v.Name, j)
+				}
+				if gc.Timeout != 0 && gc.Timeout < 1 {
+					return fmt.Errorf("vassal %q: guard at index %d (health_check): timeout must be >= 1", v.Name, j)
+				}
+			}
+		}
 	}
 
 	for i, p := range cfg.Patterns {

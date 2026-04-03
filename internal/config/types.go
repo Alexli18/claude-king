@@ -1,5 +1,7 @@
 package config
 
+import "regexp"
+
 // KingdomConfig represents the top-level kingdom configuration from .king/kingdom.yml
 type KingdomConfig struct {
 	Name         string          `yaml:"name"`
@@ -29,6 +31,34 @@ type VassalConfig struct {
 	SerialPort     string `yaml:"serial_port,omitempty"`
 	BaudRate       int    `yaml:"baud_rate,omitempty"`
 	SerialProtocol string `yaml:"serial_protocol,omitempty"` // "esp32" | "nmea" | "at" | "" (auto)
+
+	// Guards — runtime health checks for this vassal
+	Guards []GuardConfig `yaml:"guards,omitempty"`
+}
+
+// GuardConfig defines a single runtime health check for a vassal.
+type GuardConfig struct {
+	Type      string `yaml:"type"`                // "port_check" | "log_watch" | "data_rate" | "health_check"
+	Interval  int    `yaml:"interval,omitempty"`  // seconds between checks; default 10
+	Threshold int    `yaml:"threshold,omitempty"` // circuit breaker opens after N consecutive failures; default 3
+
+	// port_check fields
+	Port   int    `yaml:"port,omitempty"`   // TCP port to check (1–65535)
+	Expect string `yaml:"expect,omitempty"` // "open" | "closed"; default "open"
+
+	// log_watch fields
+	FailOn []string `yaml:"fail_on,omitempty"` // regex patterns that trigger failure
+
+	// data_rate fields
+	Min string `yaml:"min,omitempty"` // minimum throughput, e.g. "100bps", "1.5kbps", "1mbps"
+
+	// health_check fields
+	Exec    string `yaml:"exec,omitempty"`    // path to script (relative to kingdom root)
+	Timeout int    `yaml:"timeout,omitempty"` // script timeout in seconds; default 10
+
+	// Compiled at validation time (not serialized)
+	CompiledPatterns []*regexp.Regexp `yaml:"-"`
+	MinBytesPerSec   float64          `yaml:"-"`
 }
 
 // AutostartOrDefault returns the autostart value, defaulting to true if not set.

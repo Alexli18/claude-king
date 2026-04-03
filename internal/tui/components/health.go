@@ -15,9 +15,20 @@ type StatusInfo struct {
 	Vassals   int
 }
 
+// GuardInfo holds the display data for a single guard in the health panel.
+type GuardInfo struct {
+	VassalName       string
+	GuardIndex       int
+	GuardType        string
+	CircuitOpen      bool
+	ConsecutiveFails int
+	LastMessage      string
+}
+
 // HealthModel holds state for the health view.
 type HealthModel struct {
 	Status StatusInfo
+	Guards []GuardInfo
 }
 
 // HealthView renders the system health display.
@@ -62,6 +73,30 @@ func HealthView(m HealthModel, width int) string {
 			val = valueStyle.Render(r.value)
 		}
 		b.WriteString(fmt.Sprintf("%s %s\n", label, val))
+	}
+
+	// Guard health section (if any guards are configured).
+	if len(m.Guards) > 0 {
+		b.WriteString("\n")
+		b.WriteString(titleStyle.Render("  Guards"))
+		b.WriteString("\n\n")
+
+		openStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
+		okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+
+		for _, g := range m.Guards {
+			indicator := okStyle.Render("OK")
+			if g.CircuitOpen {
+				indicator = openStyle.Render("OPEN")
+			}
+			line := fmt.Sprintf("  %-20s [%d] %-12s %s",
+				g.VassalName, g.GuardIndex, g.GuardType, indicator)
+			if g.CircuitOpen {
+				line += fmt.Sprintf(" (fails: %d)", g.ConsecutiveFails)
+			}
+			b.WriteString(valueStyle.Render(line))
+			b.WriteString("\n")
+		}
 	}
 
 	// Separator.

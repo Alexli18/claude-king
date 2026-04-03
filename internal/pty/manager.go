@@ -144,6 +144,30 @@ func (m *Manager) monitorSession(s *Session) {
 	}
 }
 
+// GetSessionBytesWritten returns total bytes received from the named session's
+// PTY output, or 0 if the session does not exist. Used by the data_rate guard.
+func (m *Manager) GetSessionBytesWritten(name string) int64 {
+	m.mu.RLock()
+	s, ok := m.sessions[name]
+	m.mu.RUnlock()
+	if !ok {
+		return 0
+	}
+	return s.BytesWritten()
+}
+
+// GetSessionRecentLines returns output lines received since the given time for
+// the named session, or nil if the session does not exist. Used by the log_watch guard.
+func (m *Manager) GetSessionRecentLines(name string, since time.Time) []string {
+	m.mu.RLock()
+	s, ok := m.sessions[name]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return s.RecentOutputLines(since)
+}
+
 // GetSession returns a session by name.
 func (m *Manager) GetSession(name string) (*Session, bool) {
 	m.mu.RLock()
