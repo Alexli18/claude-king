@@ -586,7 +586,8 @@ func cmdDoctor() {
 		}
 	}
 
-	fmt.Println("King Doctor — checking kingdom health...\n")
+	fmt.Println("King Doctor — checking kingdom health...")
+	fmt.Println()
 
 	rootDir, err := os.Getwd()
 	if err != nil {
