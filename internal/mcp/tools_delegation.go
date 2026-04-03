@@ -185,6 +185,14 @@ func (s *Server) handleDelegateRelease(_ context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError(fmt.Sprintf("delegate_release failed: %v", err)), nil
 	}
 
+	// Stop the heartbeat goroutine for this vassal
+	s.heartbeatMu.Lock()
+	if cancel, ok := s.activeHeartbeats[vassal]; ok {
+		cancel()
+		delete(s.activeHeartbeats, vassal)
+	}
+	s.heartbeatMu.Unlock()
+
 	return mcp.NewToolResultText(string(raw)), nil
 }
 
@@ -265,10 +273,12 @@ func (s *Server) sendHeartbeat(vassal string) {
 			return
 		}
 		defer client2.Close()
-		client2.Call("delegate_control", map[string]interface{}{ //nolint:errcheck
+		if _, err := client2.Call("delegate_control", map[string]interface{}{
 			"vassal":      vassal,
 			"session_pid": os.Getpid(),
 			"force":       false,
-		})
+		}); err != nil {
+			s.logger.Warn("MCP_REDELEGATE_FAILED", "vassal", vassal, "err", err)
+		}
 	}
 }
