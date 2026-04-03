@@ -655,6 +655,23 @@ func (d *Daemon) watchVassal(name string, cmd *exec.Cmd, cfg config.VassalConfig
 			return
 		}
 
+		// If an MCP session has taken control of this vassal, don't restart it.
+		if d.isDelegated(name) {
+			d.logger.Info("VASSAL_DELEGATED_EXIT",
+				"vassal", name,
+				"msg", "process exited while delegated; awaiting MCP session or warden",
+			)
+			// Wait until delegation is released or daemon shuts down.
+			for d.isDelegated(name) {
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+			// Delegation released — fall through to normal restart logic.
+		}
+
 		policy := cfg.RestartPolicy
 		if policy == "" {
 			policy = "always"

@@ -74,3 +74,23 @@ func TestDelegationHelpers(t *testing.T) {
 		d.releaseDelegation("nonexistent") // should not panic
 	})
 }
+
+func TestIsDelegatedBlocksWatchVassalLogic(t *testing.T) {
+	d := &Daemon{
+		delegatedVassals: make(map[string]DelegationInfo),
+	}
+
+	d.setDelegation("ui", 1234)
+
+	// Guard: isDelegated should return true while delegation is active
+	if !d.isDelegated("ui") {
+		t.Fatal("expected ui to be delegated")
+	}
+
+	d.releaseDelegation("ui")
+
+	// After release, watchVassal would fall through to restart
+	if d.isDelegated("ui") {
+		t.Fatal("expected ui to not be delegated after release")
+	}
+}
