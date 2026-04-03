@@ -102,6 +102,12 @@ type vassalProc struct {
 	pgid    int
 }
 
+// DelegationInfo tracks an active MCP session that has taken control of a vassal.
+type DelegationInfo struct {
+	SessionPID    int
+	LastHeartbeat time.Time
+}
+
 // Daemon manages the lifecycle of a Kingdom daemon process, including the
 // UDS server, store, config, and PID file.
 type Daemon struct {
@@ -127,6 +133,8 @@ type Daemon struct {
 	vassalProcsMu     sync.RWMutex
 	externalVassals   map[string]ExternalVassalInfo
 	externalVassalsMu sync.RWMutex
+	delegatedVassals  map[string]DelegationInfo
+	delegationMu      sync.RWMutex
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -149,9 +157,10 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 		pidFile:     pidPathForRoot(absRoot),
 		sockPath:    SocketPathForRoot(absRoot),
 		logger:      logger,
-		handlers:        make(map[string]rpcHandler),
-		vassalProcs:     make(map[string]*vassalProc),
-		externalVassals: make(map[string]ExternalVassalInfo),
+		handlers:         make(map[string]rpcHandler),
+		vassalProcs:      make(map[string]*vassalProc),
+		externalVassals:  make(map[string]ExternalVassalInfo),
+		delegatedVassals: make(map[string]DelegationInfo),
 	}
 
 	d.vassalPool = NewVassalClientPool()
@@ -1729,4 +1738,47 @@ func processAlive(pid int) bool {
 	}
 	err = proc.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// ---------------------------------------------------------------------------
+// Delegation helpers
+// ---------------------------------------------------------------------------
+
+// isDelegated reports whether the named vassal is currently under MCP session control.
+func (d *Daemon) isDelegated(vassal string) bool {
+	d.delegationMu.RLock()
+	defer d.delegationMu.RUnlock()
+	_, ok := d.delegatedVassals[vassal]
+	return ok
+}
+
+// setDelegation marks a vassal as delegated to an external session.
+func (d *Daemon) setDelegation(vassal string, pid int) {
+	d.delegationMu.Lock()
+	defer d.delegationMu.Unlock()
+	d.delegatedVassals[vassal] = DelegationInfo{
+		SessionPID:    pid,
+		LastHeartbeat: time.Now(),
+	}
+}
+
+// updateHeartbeat refreshes the LastHeartbeat for a delegated vassal.
+// Returns false if the vassal is not currently delegated (daemon restarted / unknown).
+func (d *Daemon) updateHeartbeat(vassal string, pid int) bool {
+	d.delegationMu.Lock()
+	defer d.delegationMu.Unlock()
+	info, ok := d.delegatedVassals[vassal]
+	if !ok || info.SessionPID != pid {
+		return false
+	}
+	info.LastHeartbeat = time.Now()
+	d.delegatedVassals[vassal] = info
+	return true
+}
+
+// releaseDelegation removes a vassal from delegated control.
+func (d *Daemon) releaseDelegation(vassal string) {
+	d.delegationMu.Lock()
+	defer d.delegationMu.Unlock()
+	delete(d.delegatedVassals, vassal)
 }
