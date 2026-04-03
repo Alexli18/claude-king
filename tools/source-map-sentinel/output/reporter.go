@@ -22,6 +22,8 @@ func Report(w io.Writer, findings []scanner.Finding) {
 			fmt.Fprintf(w, "  [MAP FILE]           %s\n", f.Path)
 		case scanner.FindingSourceMappingURL:
 			fmt.Fprintf(w, "  [SOURCE_MAPPING_URL] %s:%d\n    %s\n", f.Path, f.Line, f.Text)
+		default:
+			fmt.Fprintf(w, "  [UNKNOWN]            %s\n", f.Path)
 		}
 	}
 }

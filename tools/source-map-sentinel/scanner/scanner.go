@@ -33,7 +33,8 @@ func Scan(root string) ([]Finding, error) {
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			// Skip unreadable entries and continue walking.
+			return nil
 		}
 		if info.IsDir() {
 			return nil
@@ -45,6 +46,8 @@ func Scan(root string) ([]Finding, error) {
 				Type: FindingMapFile,
 				Path: path,
 			})
+			// .map files are reported as FindingMapFile only; content is not scanned
+			// (chained source maps are out of scope for this tool).
 			return nil
 		}
 
