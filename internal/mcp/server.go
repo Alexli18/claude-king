@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/alexli18/claude-king/internal/store"
@@ -95,6 +97,9 @@ type Server struct {
 	// Sovereign approval config (set via SetApprovalConfig).
 	sovereignApproval        bool
 	sovereignApprovalTimeout int // seconds
+
+	parentKingdomSocket string // non-empty if this MCP runs inside another kingdom
+	inObserverMode      bool
 }
 
 // NewServer creates a new MCP Server with the given dependencies.
@@ -117,6 +122,13 @@ func NewServer(ptyMgr PTYManager, s *store.Store, ledger ArtifactLedger, kingdom
 	}
 
 	srv.RegisterTools()
+
+	// Detect if running inside a parent kingdom (enables observer/delegate mode)
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		regPath := filepath.Join(homeDir, ".king", "registry.json")
+		srv.detectParentKingdom(regPath)
+	}
+
 	return srv
 }
 
