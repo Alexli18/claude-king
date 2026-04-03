@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1359,6 +1360,14 @@ func (d *Daemon) registerStubHandlers() {
 		if info.PID <= 0 {
 			return nil, fmt.Errorf("pid must be positive")
 		}
+		// Reject control characters and ANSI escapes that could inject terminal sequences.
+		for _, field := range []string{info.Socket, info.RepoPath} {
+			for _, r := range field {
+				if r < 0x20 || r == 0x7f {
+					return nil, fmt.Errorf("invalid characters in socket or repo_path")
+				}
+			}
+		}
 		d.externalVassalsMu.Lock()
 		d.externalVassals[info.Name] = info
 		d.externalVassalsMu.Unlock()
@@ -1396,6 +1405,7 @@ func (d *Daemon) registerStubHandlers() {
 				Socket: v.Socket, PID: v.PID, Alive: alive,
 			})
 		}
+		sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 		return map[string]interface{}{"vassals": result}, nil
 	}
 

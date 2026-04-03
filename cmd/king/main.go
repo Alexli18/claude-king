@@ -343,8 +343,8 @@ func cmdList() {
 			fmt.Println("  vassals: (none)")
 			continue
 		}
-		defer client.Close()
 		raw, err := client.Call("vassal.list", nil)
+		client.Close()
 		if err != nil {
 			fmt.Println("  vassals: (none)")
 			continue
