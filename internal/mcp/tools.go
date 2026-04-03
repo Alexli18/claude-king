@@ -649,9 +649,14 @@ func (s *Server) handleGetSerialEvents(_ context.Context, request mcp.CallToolRe
 
 	after := time.Now().Add(-dur)
 
+	// Resolve vassal name to its UUID for the source_id filter.
+	vassalID := ""
+	if v, lookupErr := s.store.GetVassalByName(s.kingdomID, vassalName); lookupErr == nil && v != nil {
+		vassalID = v.ID
+	}
 	// Fetch events pre-filtered by source at the DB layer to reduce load;
 	// the time-window filter is applied in-memory below.
-	all, err := s.store.ListEvents(s.kingdomID, "", vassalName, 0)
+	all, err := s.store.ListEvents(s.kingdomID, "", vassalID, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("store error: %v", err)), nil
 	}

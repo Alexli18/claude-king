@@ -224,6 +224,27 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.logger.Warn("failed to clean old audit entries", "err", err)
 	}
 
+	// Pre-inject serial contracts into config.Patterns before sieve is compiled (T-Hardware).
+	// startVassals would do this too, but sieve must be created with the full pattern set.
+	for _, vc := range d.config.Vassals {
+		if vc.TypeOrDefault() != "serial" {
+			continue
+		}
+		proto := vc.SerialProtocol
+		if proto == "" {
+			if pt := fingerprint.SerialProtocolForBaud(vc.BaudRate); pt != fingerprint.ProjectTypeUnknown {
+				proto = string(pt)
+			}
+		}
+		if proto != "" {
+			autoContracts := fingerprint.DefaultContracts(fingerprint.ProjectType(proto), "")
+			for i := range autoContracts {
+				autoContracts[i].Source = vc.Name
+			}
+			d.config.Patterns = mergePatterns(d.config.Patterns, autoContracts)
+		}
+	}
+
 	// Create Semantic Sieve for event detection (T031).
 	compiledPatterns, err := events.CompilePatterns(d.config.Patterns)
 	if err != nil {
@@ -399,7 +420,7 @@ func (d *Daemon) startVassals() error {
 		}
 
 		id := uuid.New().String()
-		_, err := d.ptyMgr.CreateSession(id, vc.Name, expandSerialCommand(vc), cwd, vc.Env)
+		sess, err := d.ptyMgr.CreateSession(id, vc.Name, expandSerialCommand(vc), cwd, vc.Env)
 		if err != nil {
 			d.logger.Error("failed to start vassal", "name", vc.Name, "err", err)
 			continue
@@ -408,11 +429,13 @@ func (d *Daemon) startVassals() error {
 		// Wire up Semantic Sieve to monitor vassal output (T031).
 		// Also record ingestion audit entries when audit_ingestion is enabled.
 		if d.sieve != nil {
-			sieveCallback := d.sieve.OutputCallback(vc.Name, id)
+			// Use sess.ID (the actual DB vassal ID) rather than the locally generated id,
+			// which may differ if the vassal was reused from a previous daemon run.
+			sieveCallback := d.sieve.OutputCallback(vc.Name, sess.ID)
 			auditIngestion := d.config.Settings.AuditIngestion
 			recorder := d.auditRecorder
 			vassalName := vc.Name
-			vassalID := id
+			vassalID := sess.ID
 			_ = d.ptyMgr.SetOnOutput(vc.Name, func(line string) {
 				// Ingestion layer audit (if enabled).
 				if auditIngestion && recorder != nil {

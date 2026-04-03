@@ -1,11 +1,11 @@
 ```
-         ╔══╗
-        ╔╝♔ ╚╗         C L A U D E   K I N G
+         ╔═══╗
+        ╔╝ ♔ ╚╗         C L A U D E   K I N G
        ╔╝  ♦  ╚╗
       ╔╝ ◆   ◆ ╚╗      Sovereign AI Orchestration
      ╔╝◆   ●   ◆╚╗
-    ╔╝ │  ╱│╲  │ ╚╗     ● ── ● ── ●
-   ╔╝  ● ╱ │ ╲ ● ╚╗    ╱│╲  │  ╱│╲
+    ╔╝ │  ╱│╲  │ ╚╗      ●── ● ──●
+   ╔╝  ● ╱ │ ╲ ●  ╚╗    ╱│╲  │  ╱│╲
    ╚═══════════════╝   ● ● ● ● ● ● ●
 ```
 
@@ -37,10 +37,15 @@ go build -o king ./cmd/king && go build -o kingctl ./cmd/kingctl
 
 # 2. Rise
 cd ~/your-project
-king up
+king up             # foreground (logs to stdout)
+king up --detach    # background daemon (logs to .king/daemon.log)
 
 # 3. Rule
+king list           # show all running kingdoms (cross-directory)
 kingctl status
+
+# 4. Stop
+king down
 ```
 
 That's it. Your Kingdom is running.
@@ -68,7 +73,7 @@ Every Kingdom is governed by a chain of loyal subjects:
   ┌─────────────────────────────────────┐
   │         👑  THE KING  (daemon)      │
   │                                     │
-  │  📜 Ledger ──► 🛡️ Royal Guard      │
+  │  📜 Ledger ──► 🛡️ Royal Guard       │
   │  🔮 Court Mage                      │
   │  ⚖️ Inquisitor                      │
   │  📯 Herald                          │
@@ -86,15 +91,18 @@ Every Kingdom is governed by a chain of loyal subjects:
 ```
 $ king up
 
-👑 Kingdom: my-project  [running]
-├── ⚔️  api          🟢 running    idle 3s
-├── ⚔️  esp32-watch  🟢 running    streaming
-└── ⚔️  tests        🔴 failed     ⚠ 2 errors detected
+time=... level=INFO msg="daemon started" root=/my-project pid=48291
+time=... level=INFO msg="vassal started" name=api
+time=... level=INFO msg="vassal started" name=esp32-watch
+time=... level=INFO msg="vassal started" name=tests
+time=... level=INFO msg="event detected" pattern=generic-error severity=error vassal=tests
+time=... level=WARN msg=FILE_BLOCKED vassal=api path=config.yml reason=AWS_KEY_DETECTED
 
-🔮 Court Mage: Go project detected — contracts inscribed: [go-vet-error]
-⚖️ Inquisitor: Artifact 'build.bin' passed integrity checks
-🛡️ Royal Guard: Halt! Secret token spotted in config.yml — artifact banished
-📯 Herald: [api] ERROR: connection refused on :8080
+$ king list
+
+KINGDOM                              STATUS       PID      SOCKET
+------------------------------------------------------------------------
+/Users/alex/my-project               running      48291    .king/king-a3f9c1.sock
 ```
 
 ```
@@ -102,7 +110,7 @@ $ kingctl status
 
 KINGDOM     my-project          ● running  pid 48291
 SOCKET      .king/king-a3f9c1.sock
-REALM       /Users/alex/my-project
+ROOT        /Users/alex/my-project
 
 VASSAL          STATUS     LAST SEEN    EVENTS
 api             🟢 idle    2s ago       0 errors
@@ -110,7 +118,7 @@ esp32-watch     🟢 active  now          3 warnings
 tests           🔴 failed  12s ago      2 errors
 
 INTEGRITY       go-vet-error (auto) · eslint-error (auto)
-LEDGER          4 artifacts  ·  0 blocked  ·  1 banished
+LEDGER          4 artifacts  ·  0 blocked  ·  1 flagged
 ```
 
 ---
@@ -131,19 +139,26 @@ vassals:
       PORT: "8080"
 
   - name: esp32-watch
-    command: minicom -D /dev/ttyUSB0
+    type: serial              # native serial reader (no minicom needed)
+    serial_port: /dev/ttyUSB0
+    baud_rate: 115200
+    serial_protocol: esp32   # "esp32" | "nmea" | "at" | "" (auto)
     autostart: true
-    repo_path: ../firmware   # ← Vassal declares its own kingdom
 
   - name: tests
     command: go test ./... -watch
     autostart: false
 
 patterns:
-  - name: panic
-    regex: "panic:|fatal error:"
+  - name: esp32-panic
+    regex: 'panic: core \d+'
     severity: critical
-    summary_template: "💀 Vassal {vassal} is down: {match}"
+    source: esp32-watch
+    summary_template: "ESP32 panic: {match}"
+  - name: build-fail
+    regex: "FAIL|fatal error:"
+    severity: error
+    summary_template: "Build failure in {vassal}: {match}"
 ```
 
 ### Vassal Zero-Config
@@ -161,20 +176,20 @@ The **Court Mage** fingerprints the directory and inscribes integrity contracts 
 
 ## Security & Integrity
 
-### 🛡️ Royal Guard — Secret Scanner
+### Secret Scanner
 
-Every artifact submitted to the Ledger passes inspection. The Guard blocks:
+Every artifact submitted to the Ledger passes inspection. Blocked threats:
 
-| Threat | Example |
+| Threat | Log code |
 |---|---|
-| Sensitive filenames | `.env`, `id_rsa`, `*.pem`, `credentials.*` |
-| AWS credentials | `AWS_ACCESS_KEY_ID=AKIA...` |
-| GitHub tokens | `ghp_...`, `ghs_...` |
-| Private keys | `-----BEGIN RSA PRIVATE KEY-----` |
-| OpenAI keys | `sk-...` (48 chars) |
+| Sensitive filenames (`.env`, `id_rsa`, `*.pem`) | `FILENAME_BLACKLISTED` |
+| Sensitive extensions (`.pem`, `.key`, `.p12`) | `EXTENSION_BLOCKED` |
+| AWS credentials (`AKIA...`) | `AWS_KEY_DETECTED` |
+| GitHub tokens (`ghp_...`, `ghs_...`) | `GITHUB_TOKEN_DETECTED` |
+| Private keys (`-----BEGIN RSA PRIVATE KEY-----`) | `PRIVATE_KEY_DETECTED` |
 
 ```
-🛡️ Royal Guard: Halt! INVALID_SECURITY: filename:blacklisted:.env
+level=WARN msg=FILE_BLOCKED path=config.yml reason=AWS_KEY_DETECTED
 ```
 
 ### ⚖️ Inquisitor — Auto-Integrity
@@ -223,17 +238,18 @@ Connect Claude Code to your Kingdom by adding the MCP server. Then your AI has:
 
 | Tool | What it does |
 |---|---|
-| `list_vassals()` | Status of every vassal in the realm |
+| `list_vassals()` | Status of every vassal |
 | `exec_in(vassal, cmd)` | Run a command in a background terminal |
 | `read_artifact(name)` | Fetch a file from the Ledger by name |
 | `read_neighbor(path)` | Read files from another vassal's repo |
 | `get_events(severity)` | Fetch recent errors and warnings |
+| `get_serial_events(vassal, since, severity)` | Fetch events from a serial vassal (ESP32, NMEA, AT) |
 
 ```
-Claude: "The tests are failing in the firmware vassal. Let me check."
-→ exec_in("esp32-watch", "minicom --send test-payload.bin")
-→ get_events("error")
-→ "The ESP32 is rejecting your JSON timestamp format. Fix it in api/types.go."
+Claude: "The firmware is crashing. Let me investigate."
+→ get_serial_events("esp32-watch", "1h", "critical")
+→ [{"severity":"critical","pattern":"esp32-panic","summary":"ESP32 panic: panic: core 0"}]
+→ "Core 0 panicked — likely a stack overflow in the WiFi task."
 ```
 
 ---
@@ -258,9 +274,10 @@ You rule.
 
 - [x] **Phase 1** — King daemon, PTY sessions, MCP server
 - [x] **Phase 2** — Vassal protocol (VMP), Artifact Ledger
-- [x] **Phase 3** — Semantic Sieve (RTK), event filtering, Royal Audit
+- [x] **Phase 3** — Semantic Sieve, event filtering, Royal Audit
 - [x] **Phase 3.5** — Zero-config onboarding, Secret Scanner, Auto-Integrity
-- [ ] **Phase 4** — TUI dashboard (`king tui`), Herald webhooks, Vector memory
+- [x] **Phase 3.6** — Serial vassal (ESP32/NMEA/AT), `get_serial_events` MCP tool, `king list` P2P registry
+- [ ] **Phase 4** — TUI dashboard (`king tui`), event webhooks, Vector memory
 
 ---
 
