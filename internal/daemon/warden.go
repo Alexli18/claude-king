@@ -15,7 +15,7 @@ func (d *Daemon) wardenTick(timeout time.Duration) {
 	d.delegationMu.Lock()
 	stale := make([]string, 0)
 	for vassal, info := range d.delegatedVassals {
-		if time.Since(info.LastHeartbeat) > timeout {
+		if timeNow().Sub(info.LastHeartbeat) > timeout {
 			stale = append(stale, vassal)
 		}
 	}
@@ -25,7 +25,7 @@ func (d *Daemon) wardenTick(timeout time.Duration) {
 		d.logger.Warn("DELEGATION_EXPIRED",
 			"vassal", vassal,
 			"session_pid", info.SessionPID,
-			"stale_for", time.Since(info.LastHeartbeat).Round(time.Second).String(),
+			"stale_for", timeNow().Sub(info.LastHeartbeat).Round(time.Second).String(),
 		)
 	}
 	d.delegationMu.Unlock()
