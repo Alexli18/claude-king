@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -10,6 +11,44 @@ import (
 
 	"github.com/alexli18/claude-king/internal/daemon"
 )
+
+// startTestDaemon starts a full daemon in a temp directory and returns the
+// daemon instance and its socket path. It registers a cleanup to stop the
+// daemon when the test ends.
+//
+// Uses os.MkdirTemp("", ...) to get a short path under /tmp, avoiding the
+// 104-char Unix socket path limit on macOS.
+func startTestDaemon(t *testing.T) (*daemon.Daemon, string) {
+	t.Helper()
+
+	// t.TempDir() produces paths under /var/folders/... which are too long for
+	// Unix socket paths on macOS (limit: 104 chars). Use /tmp instead.
+	rootDir, err := os.MkdirTemp("", "kingtest-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(rootDir) })
+
+	d, err := daemon.NewDaemon(rootDir)
+	if err != nil {
+		t.Fatalf("NewDaemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := d.Start(ctx); err != nil {
+		cancel()
+		t.Fatalf("Start: %v", err)
+	}
+
+	sockPath := daemon.SocketPathForRoot(rootDir)
+
+	t.Cleanup(func() {
+		cancel()
+		_ = d.Stop()
+	})
+
+	return d, sockPath
+}
 
 func TestVassalRegisterRPC(t *testing.T) {
 	rootDir := t.TempDir()
@@ -89,5 +128,40 @@ func TestVassalRegisterRPC(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("firmware not found in vassal.list response: %v", resp2)
+	}
+}
+
+func TestKingdomStatusRPC(t *testing.T) {
+	_, sockPath := startTestDaemon(t)
+
+	client, err := daemon.NewClientFromSocket(sockPath)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+
+	raw, err := client.Call("kingdom.status", nil)
+	if err != nil {
+		t.Fatalf("kingdom.status: %v", err)
+	}
+
+	var resp struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		PID    int    `json:"pid"`
+		Root   string `json:"root"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.ID == "" {
+		t.Error("expected non-empty ID")
+	}
+	if resp.Status == "" {
+		t.Error("expected non-empty Status")
+	}
+	if resp.PID == 0 {
+		t.Error("expected non-zero PID")
 	}
 }

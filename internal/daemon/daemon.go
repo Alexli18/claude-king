@@ -1490,6 +1490,23 @@ func (d *Daemon) registerRealHandlers() {
 		return map[string]string{"status": "shutting_down"}, nil
 	}
 
+	// kingdom.status — returns kingdom identity and runtime info.
+	d.handlers["kingdom.status"] = func(_ json.RawMessage) (interface{}, error) {
+		return struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Root   string `json:"root"`
+			PID    int    `json:"pid"`
+			Status string `json:"status"`
+		}{
+			ID:     d.kingdom.ID,
+			Name:   d.config.Name,
+			Root:   d.rootDir,
+			PID:    os.Getpid(),
+			Status: d.kingdom.GetStatus(),
+		}, nil
+	}
+
 }
 
 // ---------------------------------------------------------------------------

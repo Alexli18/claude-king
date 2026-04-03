@@ -34,6 +34,10 @@ func main() {
 		cmdDashboard()
 	case "list":
 		cmdList()
+	case "status":
+		cmdStatus()
+	case "prompt-info":
+		cmdPromptInfo()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -50,6 +54,8 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  mcp            Start MCP server on stdio (for Claude Code)")
 	fmt.Fprintln(os.Stderr, "  dashboard      Open the TUI dashboard")
 	fmt.Fprintln(os.Stderr, "  list           List all registered kingdoms")
+	fmt.Fprintln(os.Stderr, "  status         Show current kingdom status and ID")
+	fmt.Fprintln(os.Stderr, "  prompt-info    Output kingdom name:id8 for shell prompt (safe for PS1)")
 }
 
 // registryPath returns the path to the global King P2P registry file.
@@ -402,4 +408,69 @@ func cmdDashboard() {
 		fmt.Fprintf(os.Stderr, "dashboard error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func cmdStatus() {
+	rootDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	client, err := daemon.NewClient(rootDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "no kingdom running here: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	raw, err := client.Call("kingdom.status", nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	var resp struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Root   string `json:"root"`
+		PID    int    `json:"pid"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Kingdom: %s\n", resp.Name)
+	fmt.Printf("ID:      %s\n", resp.ID)
+	fmt.Printf("Root:    %s\n", resp.Root)
+	fmt.Printf("Status:  %s\n", resp.Status)
+	fmt.Printf("PID:     %d\n", resp.PID)
+}
+
+func cmdPromptInfo() {
+	rootDir, err := os.Getwd()
+	if err != nil {
+		os.Exit(0) // silent — safe for prompt
+	}
+	client, err := daemon.NewClient(rootDir)
+	if err != nil {
+		os.Exit(0) // no kingdom, silent
+	}
+	defer client.Close()
+
+	raw, err := client.Call("kingdom.status", nil)
+	if err != nil {
+		os.Exit(0)
+	}
+	var resp struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		os.Exit(0)
+	}
+	shortID := resp.ID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	fmt.Printf("👑 %s:%s\n", resp.Name, shortID)
 }
