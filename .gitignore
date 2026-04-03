@@ -39,3 +39,8 @@ Thumbs.db
 
 # Git worktrees
 .worktrees/
+
+# Local dev tooling
+.claude/
+.specify/
+docs/plans/
