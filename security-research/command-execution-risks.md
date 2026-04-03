@@ -48,6 +48,7 @@ This requires a compromised or misconfigured orchestrator, not a direct attacker
 - The MCP tool handler (`handleExecIn` in `internal/mcp/tools.go`) does not itself enforce approval; it relies on the daemon RPC layer to do so. Callers invoking the MCP tool directly (not via the daemon) bypass this gate.
 - The circuit breaker does not gate `exec_in` directly, only `delegate_control`.
 - PTY output is captured but not scanned for secrets before being returned to the caller.
+- `read_neighbor` allows any MCP caller to read any file within the kingdom root. No allowlist restricts access to sensitive files (e.g., `.king/king.db`, config YAML files) that may exist within the root — only path traversal outside the root is blocked.
 
 ## Recommendations
 

@@ -20,7 +20,11 @@ Claude King's permission model consists of two partially overlapping mechanisms:
 
 ## Risk Description
 
-Of the MCP tools registered in `internal/mcp/server.go`, only `exec_in` has a sovereign approval gate, and that gate is enforced in the daemon RPC handler rather than in the MCP tool handler itself. All other tools — including `list_vassals`, `get_events`, `register_artifact`, `dispatch_task`, `abort_task` — execute without any approval gate.
+Of the MCP tools registered in `internal/mcp/server.go`, only `exec_in` has a sovereign approval gate, and that gate is enforced in the daemon RPC handler rather than in the MCP tool handler itself. All other tools execute without any approval gate, including:
+
+- **Read operations:** `list_vassals`, `get_events`, `guard_status`, `get_audit_log`, `get_action_trace`, `get_serial_events`, `delegate_status`
+- **State-modifying:** `register_artifact`, `dispatch_task`, `abort_task`, `delegate_release`
+- **Read with sensitive data:** `get_audit_log` and `get_action_trace` expose command history and approval records to any MCP caller without additional authentication
 
 Operations like `register_artifact` and `dispatch_task` can have significant side effects: storing potentially sensitive data to the Ledger, spawning new vassal processes, modifying kingdom state. These are not gated by either the approval mechanism or the circuit breaker.
 

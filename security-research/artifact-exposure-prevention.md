@@ -42,9 +42,9 @@ An AI model could receive a secret (e.g. an AWS key) in `exec_in` output and for
 - `*.env` (by extension check) and `.env.*` (by prefix check)
 
 **Content scanning** (regex patterns applied to text files with eligible extensions, limited to files ≤ 1MB):
-- AWS access key ID: `AWS_ACCESS_KEY_ID\s*[=:]\s*[A-Z0-9]{16,}`
-- AWS secret access key: `AWS_SECRET_ACCESS_KEY\s*[=:]\s*[A-Za-z0-9/+=]{32,}`
-- GitHub token env var: `GITHUB_TOKEN\s*[=:]\s*[A-Za-z0-9_]{20,}`
+- AWS access key ID: `(?i)AWS_ACCESS_KEY_ID\s*[=:]\s*[A-Z0-9]{16,}`
+- AWS secret access key: `(?i)AWS_SECRET_ACCESS_KEY\s*[=:]\s*[A-Za-z0-9/+=]{32,}`
+- GitHub token env var: `(?i)GITHUB_TOKEN\s*[=:]\s*[A-Za-z0-9_]{20,}`
 - GitHub personal access token: `ghp_[A-Za-z0-9]{36}`
 - GitHub server-to-server token: `ghs_[A-Za-z0-9]{36}`
 - OpenAI API key: `sk-[A-Za-z0-9]{48}`
