@@ -1598,11 +1598,14 @@ func (d *Daemon) registerStubHandlers() {
 
 		// Perform liveness checks outside the lock.
 		type vassalEntry struct {
-			Name     string `json:"name"`
-			RepoPath string `json:"repo_path"`
-			Socket   string `json:"socket"`
-			PID      int    `json:"pid"`
-			Alive    bool   `json:"alive"`
+			Name          string `json:"name"`
+			RepoPath      string `json:"repo_path"`
+			Socket        string `json:"socket"`
+			PID           int    `json:"pid"`
+			Alive         bool   `json:"alive"`
+			Delegated     bool   `json:"delegated"`
+			ControllerPID int    `json:"controller_pid"`
+			HeartbeatAgeS int    `json:"heartbeat_age_s"`
 		}
 		result := make([]vassalEntry, 0, len(snapshot))
 		for _, v := range snapshot {
@@ -1612,9 +1615,28 @@ func (d *Daemon) registerStubHandlers() {
 					alive = proc.Signal(syscall.Signal(0)) == nil
 				}
 			}
+			controllerPID := func() int {
+				d.delegationMu.RLock()
+				defer d.delegationMu.RUnlock()
+				if info, ok := d.delegatedVassals[v.Name]; ok {
+					return info.SessionPID
+				}
+				return 0
+			}()
+			heartbeatAgeS := func() int {
+				d.delegationMu.RLock()
+				defer d.delegationMu.RUnlock()
+				if info, ok := d.delegatedVassals[v.Name]; ok {
+					return int(time.Since(info.LastHeartbeat).Seconds())
+				}
+				return 0
+			}()
 			result = append(result, vassalEntry{
 				Name: v.Name, RepoPath: v.RepoPath,
 				Socket: v.Socket, PID: v.PID, Alive: alive,
+				Delegated:     d.isDelegated(v.Name),
+				ControllerPID: controllerPID,
+				HeartbeatAgeS: heartbeatAgeS,
 			})
 		}
 		sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })

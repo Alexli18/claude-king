@@ -376,9 +376,12 @@ func cmdList() {
 		}
 		var resp struct {
 			Vassals []struct {
-				Name     string `json:"name"`
-				RepoPath string `json:"repo_path"`
-				Alive    bool   `json:"alive"`
+				Name          string `json:"name"`
+				RepoPath      string `json:"repo_path"`
+				Alive         bool   `json:"alive"`
+				Delegated     bool   `json:"delegated"`
+				ControllerPID int    `json:"controller_pid"`
+				HeartbeatAgeS int    `json:"heartbeat_age_s"`
 			} `json:"vassals"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil || len(resp.Vassals) == 0 {
@@ -386,12 +389,18 @@ func cmdList() {
 			continue
 		}
 		fmt.Println("  vassals:")
+		fmt.Printf("  %-20s %-12s %s\n", "VASSAL", "STATUS", "CONTROLLER")
 		for _, v := range resp.Vassals {
-			alive := "alive"
+			status := "running"
 			if !v.Alive {
-				alive = "dead"
+				status = "dead"
 			}
-			fmt.Printf("    %-20s %-40s %s\n", v.Name, v.RepoPath, alive)
+			controller := "daemon"
+			if v.Delegated {
+				status = "DELEGATED"
+				controller = fmt.Sprintf("Claude[PID %d] (%ds ago)", v.ControllerPID, v.HeartbeatAgeS)
+			}
+			fmt.Printf("    %-20s %-12s %s\n", v.Name, status, controller)
 		}
 	}
 }
