@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -317,15 +317,49 @@ func cmdList() {
 		return
 	}
 
-	fmt.Printf("%-40s %-12s %-8s %s\n", "KINGDOM", "STATUS", "PID", "SOCKET")
-	fmt.Println(strings.Repeat("-", 80))
-
 	for path, e := range entries {
 		status := "running"
 		if !e.Reachable {
 			status = "unreachable"
 		}
-		fmt.Printf("%-40s %-12s %-8d %s\n", path, status, e.PID, e.Socket)
+		fmt.Printf("Kingdom: %s  [%s, pid=%d]\n", path, status, e.PID)
+
+		if !e.Reachable {
+			fmt.Println("  vassals: (kingdom unreachable)")
+			continue
+		}
+
+		// Query vassals from the daemon.
+		client, err := daemon.NewClient(path)
+		if err != nil {
+			fmt.Println("  vassals: (could not connect)")
+			continue
+		}
+		raw, err := client.Call("vassal.list", nil)
+		client.Close()
+		if err != nil {
+			fmt.Println("  vassals: (none)")
+			continue
+		}
+		var resp struct {
+			Vassals []struct {
+				Name     string `json:"name"`
+				RepoPath string `json:"repo_path"`
+				Alive    bool   `json:"alive"`
+			} `json:"vassals"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil || len(resp.Vassals) == 0 {
+			fmt.Println("  vassals: (none)")
+			continue
+		}
+		fmt.Println("  vassals:")
+		for _, v := range resp.Vassals {
+			alive := "alive"
+			if !v.Alive {
+				alive = "dead"
+			}
+			fmt.Printf("    %-20s %-40s %s\n", v.Name, v.RepoPath, alive)
+		}
 	}
 }
 
