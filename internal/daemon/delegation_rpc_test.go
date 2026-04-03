@@ -109,18 +109,32 @@ func TestDelegateReleaseHandler(t *testing.T) {
 	d.handlers = make(map[string]rpcHandler)
 	registerDelegationHandlers(d)
 
-	d.setDelegation("ui", 1234)
+	t.Run("release delegated vassal clears delegation", func(t *testing.T) {
+		d.setDelegation("ui", 1234)
 
-	params, _ := json.Marshal(map[string]interface{}{"vassal": "ui"})
-	result, err := d.handlers["delegate_release"](params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := result.(map[string]interface{})
-	if m["ok"] != true {
-		t.Fatalf("expected ok=true")
-	}
-	if d.isDelegated("ui") {
-		t.Fatal("expected ui to not be delegated after release")
-	}
+		params, _ := json.Marshal(map[string]interface{}{"vassal": "ui"})
+		result, err := d.handlers["delegate_release"](params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		m := result.(map[string]interface{})
+		if m["ok"] != true {
+			t.Fatalf("expected ok=true")
+		}
+		if d.isDelegated("ui") {
+			t.Fatal("expected ui to not be delegated after release")
+		}
+	})
+
+	t.Run("release non-delegated vassal is no-op", func(t *testing.T) {
+		params, _ := json.Marshal(map[string]interface{}{"vassal": "nonexistent"})
+		result, err := d.handlers["delegate_release"](params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		m := result.(map[string]interface{})
+		if m["ok"] != true {
+			t.Fatalf("expected ok=true for no-op release")
+		}
+	})
 }
