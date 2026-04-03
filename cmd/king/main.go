@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +40,8 @@ func main() {
 		cmdStatus()
 	case "prompt-info":
 		cmdPromptInfo()
+	case "doctor":
+		cmdDoctor()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -50,12 +54,13 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  up [--detach]  Start the Kingdom daemon")
-	fmt.Fprintln(os.Stderr, "  down           Stop the Kingdom daemon")
+	fmt.Fprintln(os.Stderr, "  down [--force] Stop the Kingdom daemon (--force kills zombie processes)")
 	fmt.Fprintln(os.Stderr, "  mcp            Start MCP server on stdio (for Claude Code)")
 	fmt.Fprintln(os.Stderr, "  dashboard      Open the TUI dashboard")
 	fmt.Fprintln(os.Stderr, "  list           List all registered kingdoms")
 	fmt.Fprintln(os.Stderr, "  status         Show current kingdom status and ID")
 	fmt.Fprintln(os.Stderr, "  prompt-info    Output kingdom name:id8 for shell prompt (safe for PS1)")
+	fmt.Fprintln(os.Stderr, "  doctor         Check kingdom health")
 }
 
 // registryPath returns the path to the global King P2P registry file.
@@ -123,12 +128,17 @@ func cmdUp() {
 	}()
 
 	if daemonMode {
-		// Daemon mode: block until the daemon's internal context is cancelled.
-		// When "king down" sends the shutdown RPC, the daemon's "shutdown"
-		// handler calls d.cancel() which closes d.ctx (a child of ctx).
-		// We must wait on d.Done() (d.ctx.Done()) — NOT the parent ctx —
-		// because d.cancel() only cancels the child context.
-		<-d.Done()
+		// Daemon mode: block until either a signal or a remote shutdown RPC.
+		// SIGTERM/SIGINT handling is required here because `kill <pid>` or
+		// `pkill king` would otherwise terminate the process without calling
+		// d.Stop(), leaving king-vassal child processes running as zombies.
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+		select {
+		case <-sigCh:
+		case <-d.Done():
+		}
 	} else {
 		fmt.Println("Kingdom is running. Press Ctrl+C to stop.")
 		sigCh := make(chan os.Signal, 1)
@@ -240,6 +250,14 @@ func cmdDown() {
 		os.Exit(1)
 	}
 
+	// --force: kill all king / king-vassal processes and clean up files,
+	// even when no daemon is reachable (handles zombie processes from crashes).
+	force := len(os.Args) > 2 && os.Args[2] == "--force"
+	if force {
+		cmdDownForce(rootDir)
+		return
+	}
+
 	running, err := daemon.IsRunning(rootDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -280,6 +298,53 @@ func cmdDown() {
 	_ = reg.Unregister(rootDir)
 }
 
+// cmdDownForce kills all king daemon and king-vassal processes for this
+// rootDir, then cleans up stale socket/PID files. Use when the daemon is
+// unreachable but child processes are still running (zombie scenario).
+func cmdDownForce(rootDir string) {
+	kingDir := filepath.Join(rootDir, ".king")
+
+	// Read all king-*.pid files and kill the processes.
+	pidFiles, _ := filepath.Glob(filepath.Join(kingDir, "king-*.pid"))
+	for _, pf := range pidFiles {
+		data, err := os.ReadFile(pf)
+		if err != nil {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			if err := proc.Signal(syscall.SIGTERM); err == nil {
+				fmt.Printf("Sent SIGTERM to daemon PID %d\n", pid)
+			}
+		}
+		_ = os.Remove(pf)
+	}
+
+	// Give processes a moment to exit, then clean up sockets.
+	time.Sleep(500 * time.Millisecond)
+	sockFiles, _ := filepath.Glob(filepath.Join(kingDir, "king-*.sock"))
+	for _, sf := range sockFiles {
+		_ = os.Remove(sf)
+		fmt.Printf("Removed socket %s\n", sf)
+	}
+	// Clean vassal sockets.
+	vassalSocks, _ := filepath.Glob(filepath.Join(kingDir, "vassals", "*.sock"))
+	for _, sf := range vassalSocks {
+		_ = os.Remove(sf)
+	}
+
+	reg := registry.NewRegistry(registryPath())
+	_ = reg.Unregister(rootDir)
+
+	fmt.Println("Force shutdown complete.")
+	fmt.Println("Note: king-vassal child processes were managed by the daemon.")
+	fmt.Println("If any remain, run: pkill -f 'king-vassal --name'")
+}
+
 func cmdMCP() {
 	rootDir, err := os.Getwd()
 	if err != nil {
@@ -297,8 +362,15 @@ func cmdMCP() {
 	defer cancel()
 
 	if err := d.Start(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		if !strings.Contains(err.Error(), "kingdom already running") {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		// Daemon already running — attach to existing state for MCP-only mode.
+		if err := d.Attach(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Start MCP server on stdio.
@@ -501,4 +573,62 @@ func cmdPromptInfo() {
 		shortID = shortID[:8]
 	}
 	fmt.Printf("👑 %s:%s\n", resp.Name, shortID)
+}
+
+func cmdDoctor() {
+	allOK := true
+	check := func(label string, pass bool, hint string) {
+		if pass {
+			fmt.Printf("  ✓ %s\n", label)
+		} else {
+			fmt.Printf("  ✗ %s\n    hint: %s\n", label, hint)
+			allOK = false
+		}
+	}
+
+	fmt.Println("King Doctor — checking kingdom health...\n")
+
+	rootDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 1. .king directory exists
+	kingDir := filepath.Join(rootDir, ".king")
+	_, err = os.Stat(kingDir)
+	check(".king directory exists", err == nil, "run 'king up' to initialize the kingdom")
+
+	// 2. kingdom.yml exists
+	cfgPath := filepath.Join(kingDir, "kingdom.yml")
+	_, err = os.Stat(cfgPath)
+	check("kingdom.yml found", err == nil, "create .king/kingdom.yml — see README for examples")
+
+	// 3. Daemon socket exists
+	sockPath := daemon.SocketPathForRoot(rootDir)
+	_, err = os.Stat(sockPath)
+	socketExists := err == nil
+	check("daemon socket exists", socketExists, "run 'king up' to start the daemon")
+
+	// 4. Daemon responds
+	if socketExists {
+		client, connErr := daemon.NewClient(rootDir)
+		responds := connErr == nil
+		check("daemon responds to connections", responds, "socket exists but daemon is not responding — try 'king down --force && king up'")
+		if responds {
+			client.Close()
+		}
+	}
+
+	// 5. king-vassal in PATH
+	_, kvErr := exec.LookPath("king-vassal")
+	check("king-vassal binary in PATH", kvErr == nil, "run 'make install' or 'make install-user' to install binaries")
+
+	fmt.Println()
+	if allOK {
+		fmt.Println("All checks passed.")
+	} else {
+		fmt.Println("Some checks failed — see hints above.")
+		os.Exit(1)
+	}
 }
