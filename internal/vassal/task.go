@@ -77,6 +77,42 @@ func SaveTask(kingDir string, t *Task) error {
 	return nil
 }
 
+// RecoverOrphanedTasks scans .king/tasks/ and marks any "running" or "accepted"
+// tasks for this vassal as failed. Called on vassal startup so stale tasks from
+// a previous crashed run don't stay stuck in running state forever.
+func RecoverOrphanedTasks(kingDir, vassalName string, logger interface {
+	Warn(msg string, args ...any)
+}) {
+	dir := filepath.Join(kingDir, "tasks")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		id := e.Name()[:len(e.Name())-5] // strip .json
+		t, err := LoadTask(kingDir, id)
+		if err != nil {
+			continue
+		}
+		if t.VassalName != vassalName {
+			continue
+		}
+		if t.Status != TaskStatusRunning && t.Status != TaskStatusAccepted {
+			continue
+		}
+		t.Status = TaskStatusFailed
+		t.Error = "vassal process restarted; task was orphaned"
+		if saveErr := SaveTask(kingDir, t); saveErr != nil {
+			logger.Warn("failed to recover orphaned task", "task_id", t.ID, "err", saveErr)
+		} else {
+			logger.Warn("recovered orphaned task", "task_id", t.ID, "vassal", vassalName)
+		}
+	}
+}
+
 // LoadTask reads a Task from .king/tasks/<id>.json.
 func LoadTask(kingDir, taskID string) (*Task, error) {
 	data, err := os.ReadFile(taskPath(kingDir, taskID))

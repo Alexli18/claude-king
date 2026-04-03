@@ -73,6 +73,25 @@ func NewKingdom(s *store.Store, cfg *config.KingdomConfig, rootDir string, logge
 	return k, nil
 }
 
+// LoadKingdom loads an existing kingdom from the store without modifying its status.
+// Used by Attach mode where another daemon process owns the kingdom.
+func LoadKingdom(s *store.Store, rootDir string, logger *slog.Logger) (*Kingdom, error) {
+	existing, err := s.GetKingdomByPath(rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("lookup kingdom by path: %w", err)
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("no kingdom found at %s", rootDir)
+	}
+	return &Kingdom{
+		ID:      existing.ID,
+		store:   s,
+		rootDir: rootDir,
+		status:  existing.Status,
+		logger:  logger,
+	}, nil
+}
+
 // SetStatus updates the Kingdom status in both memory and the store.
 func (k *Kingdom) SetStatus(status string) error {
 	if err := k.store.UpdateKingdomStatus(k.ID, status); err != nil {

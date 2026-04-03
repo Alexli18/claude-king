@@ -22,6 +22,9 @@ type VassalConfig struct {
 	Host          string            `yaml:"host,omitempty"`     // SSH host for remote vassals (future use)
 	SSHUser       string            `yaml:"ssh_user,omitempty"` // SSH user (future use)
 
+	// Claude-specific (only used when Type == "claude")
+	Model string `yaml:"model,omitempty"` // e.g. "claude-opus-4-6", "claude-haiku-4-5-20251001"
+
 	// Serial-specific (only used when Type == "serial")
 	SerialPort     string `yaml:"serial_port,omitempty"`
 	BaudRate       int    `yaml:"baud_rate,omitempty"`
@@ -75,6 +78,7 @@ type Settings struct {
 	SovereignApprovalTimeout    int  `yaml:"sovereign_approval_timeout,omitempty"`
 	AuditMaxTraceOutput         int  `yaml:"audit_max_trace_output,omitempty"`
 
+	DefaultModel        string   `yaml:"default_model,omitempty"` // default model for all claude vassals
 	SecurityScanner     string   `yaml:"security_scanner,omitempty"`
 	SecurityScannerArgs []string `yaml:"security_scanner_args,omitempty"`
 }

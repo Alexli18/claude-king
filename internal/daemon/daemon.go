@@ -384,6 +384,70 @@ func (d *Daemon) Start(ctx context.Context) error {
 	return nil
 }
 
+// Attach initializes daemon state for MCP-only mode (no daemon socket, no vassal launching).
+// Use this when a daemon is already running and we just need to serve MCP over stdio.
+func (d *Daemon) Attach(ctx context.Context) error {
+	d.ctx, d.cancel = context.WithCancel(ctx)
+
+	if err := config.EnsureKingDir(d.rootDir); err != nil {
+		return fmt.Errorf("ensure king dir: %w", err)
+	}
+
+	dbPath := filepath.Join(d.rootDir, kingDirName, dbFileName)
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	d.store = s
+
+	cfg, err := config.LoadOrCreateConfig(d.rootDir)
+	if err != nil {
+		d.store.Close()
+		return fmt.Errorf("load config: %w", err)
+	}
+	d.config = cfg
+
+	d.kingdom, err = LoadKingdom(d.store, d.rootDir, d.logger)
+	if err != nil {
+		d.store.Close()
+		return fmt.Errorf("load kingdom: %w", err)
+	}
+
+	compiledPatterns, _ := events.CompilePatterns(d.config.Patterns)
+	d.sieve = events.NewSieve(compiledPatterns, d.store, d.kingdom.ID,
+		d.config.Settings.EventCooldownSeconds, d.logger.With("component", "sieve"))
+	d.auditRecorder = audit.NewAuditRecorder(d.store, d.kingdom.ID, d.logger.With("component", "audit"))
+	d.approvalMgr = audit.NewApprovalManager()
+
+	d.ptyMgr = pty.NewManager(d.store, d.kingdom.ID, d.logger.With("component", "pty"))
+
+	// Auto-connect to existing vassal sockets.
+	vassalSockDir := filepath.Join(d.rootDir, kingDirName, "vassals")
+	if entries, err := os.ReadDir(vassalSockDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".sock") {
+				continue
+			}
+			name := strings.TrimSuffix(e.Name(), ".sock")
+			sockPath := filepath.Join(vassalSockDir, e.Name())
+			if _, err := d.vassalPool.Connect(name, sockPath); err != nil {
+				d.logger.Warn("could not connect to vassal socket", "name", name, "err", err)
+			}
+		}
+	}
+
+	ledger := artifacts.NewLedgerWithSettings(d.store, d.kingdom.ID, d.config.Settings)
+	adapter := &ptyManagerAdapter{mgr: d.ptyMgr}
+	d.mcpSrv = mcp.NewServer(adapter, d.store, ledger, d.kingdom.ID, d.rootDir, d.logger.With("component", "mcp"))
+	d.mcpSrv.SetApprovalManager(d.approvalMgr, d.config.Settings.SovereignApproval, d.config.Settings.SovereignApprovalTimeout)
+	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
+
+	d.wg.Add(1)
+	go d.auditCleanupLoop()
+
+	return nil
+}
+
 // auditCleanupLoop periodically deletes old audit entries based on retention policy (T044).
 func (d *Daemon) auditCleanupLoop() {
 	defer d.wg.Done()
@@ -576,13 +640,28 @@ func (d *Daemon) launchClaudeVassal(v config.VassalConfig) (*exec.Cmd, error) {
 		d.injectAutoContracts(repoPath)
 	}
 
-	cmd := exec.Command(exe,
+	// Resolve model: vassal-specific > kingdom default > (empty = claude default).
+	model := v.Model
+	if model == "" && d.config != nil {
+		model = d.config.Settings.DefaultModel
+	}
+	args := []string{
 		"--name", v.Name,
 		"--repo", v.RepoPath,
 		"--king-dir", kingDir,
 		"--king-sock", d.sockPath,
 		"--timeout", "10",
-	)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	// Disconnect any stale pool entry and remove stale socket so the poll loop
+	// below waits for the fresh one (handles daemon restarts and vassal crashes).
+	_ = d.vassalPool.Disconnect(v.Name)
+	_ = os.Remove(sockPath)
+
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = d.rootDir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -591,7 +670,7 @@ func (d *Daemon) launchClaudeVassal(v config.VassalConfig) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("start king-vassal %q: %w", v.Name, err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := os.Stat(sockPath); err == nil {
 			break
@@ -1015,6 +1094,10 @@ func (a *vassalPoolAdapter) Get(name string) (mcp.VassalCaller, bool) {
 		return nil, false
 	}
 	return vc, true
+}
+
+func (a *vassalPoolAdapter) Names() []string {
+	return a.pool.Names()
 }
 
 // ptyManagerAdapter bridges pty.Manager to the mcp.PTYManager interface.

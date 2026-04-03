@@ -25,6 +25,7 @@ type VassalServer struct {
 	kingDir    string
 	kingSocket string
 	timeoutMin int
+	model      string // claude model to use for task execution (empty = claude default)
 	logger     *slog.Logger
 
 	mu         sync.Mutex
@@ -34,19 +35,22 @@ type VassalServer struct {
 }
 
 // NewVassalServer creates a new VassalServer.
-func NewVassalServer(name, repoPath, kingDir, kingSocket string, timeoutMin int, logger *slog.Logger) *VassalServer {
+func NewVassalServer(name, repoPath, kingDir, kingSocket string, timeoutMin int, model string, logger *slog.Logger) *VassalServer {
 	return &VassalServer{
 		name:       name,
 		repoPath:   repoPath,
 		kingDir:    kingDir,
 		kingSocket: kingSocket,
 		timeoutMin: timeoutMin,
+		model:      model,
 		logger:     logger,
 	}
 }
 
 // Start starts the MCP server on a Unix socket and returns its socket path.
 func (s *VassalServer) Start(ctx context.Context) (string, error) {
+	RecoverOrphanedTasks(s.kingDir, s.name, s.logger)
+
 	sockPath := filepath.Join(s.kingDir, "vassals", s.name+".sock")
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o755); err != nil {
 		return "", fmt.Errorf("create vassals dir: %w", err)
@@ -97,6 +101,7 @@ func (s *VassalServer) Start(ctx context.Context) (string, error) {
 // StartStdio serves MCP over the provided reader/writer (stdio mode).
 // Used when launched by Claude Code via .mcp.json.
 func (s *VassalServer) StartStdio(ctx context.Context, r io.Reader, w io.Writer) error {
+	RecoverOrphanedTasks(s.kingDir, s.name, s.logger)
 	s.mcpServer = server.NewMCPServer("king-vassal-"+s.name, "1.0.0")
 	s.registerTools()
 	stdioSrv := server.NewStdioServer(s.mcpServer)
@@ -289,11 +294,17 @@ func (s *VassalServer) runTask(t *Task) {
 	s.taskCancel = cancel
 	s.mu.Unlock()
 
-	cmd := exec.CommandContext(ctx, "claude",
+	args := []string{
 		"-p", prompt,
 		"--dangerously-skip-permissions",
 		"--output-format", "text",
-	)
+		"--mcp-config", `{"mcpServers":{}}`,
+		"--strict-mcp-config",
+	}
+	if s.model != "" {
+		args = append(args, "--model", s.model)
+	}
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = s.repoPath
 
 	// Important 5: capture stderr so it can be included in error messages.

@@ -29,26 +29,44 @@ import (
 func (s *Server) handleListVassals(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	s.logger.Debug("handling list_vassals call")
 
-	// Gather live session info from the PTY manager.
-	sessions := s.ptyMgr.ListSessions()
-
 	type vassalEntry struct {
 		Name         string `json:"name"`
+		Type         string `json:"type"`
 		Status       string `json:"status"`
-		Command      string `json:"command"`
-		PID          int    `json:"pid"`
-		LastActivity string `json:"last_activity"`
+		Command      string `json:"command,omitempty"`
+		PID          int    `json:"pid,omitempty"`
+		LastActivity string `json:"last_activity,omitempty"`
 	}
 
+	// Gather live session info from the PTY manager (shell vassals).
+	sessions := s.ptyMgr.ListSessions()
 	vassals := make([]vassalEntry, 0, len(sessions))
 	for _, sess := range sessions {
 		vassals = append(vassals, vassalEntry{
 			Name:         sess.Name,
+			Type:         "shell",
 			Status:       sess.Status,
 			Command:      sess.Command,
 			PID:          sess.PID,
 			LastActivity: sess.LastActivity,
 		})
+	}
+
+	// Add claude vassals from the vassal pool.
+	if s.vassalPool != nil {
+		ptyNames := make(map[string]bool, len(sessions))
+		for _, sess := range sessions {
+			ptyNames[sess.Name] = true
+		}
+		for _, name := range s.vassalPool.Names() {
+			if !ptyNames[name] {
+				vassals = append(vassals, vassalEntry{
+					Name:   name,
+					Type:   "claude",
+					Status: "running",
+				})
+			}
+		}
 	}
 
 	// Fetch kingdom metadata from the store.
@@ -115,6 +133,13 @@ func (s *Server) handleExecIn(_ context.Context, request mcp.CallToolRequest) (*
 	// Look up the session.
 	session, found := s.ptyMgr.GetSession(vassalName)
 	if !found {
+		// Check if it's a claude vassal — those don't have PTY sessions.
+		if s.vassalPool != nil {
+			if _, ok := s.vassalPool.Get(vassalName); ok {
+				return mcp.NewToolResultError(fmt.Sprintf(
+					"exec_in is not supported for claude vassal %q — use dispatch_task instead", vassalName)), nil
+			}
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("VASSAL_NOT_FOUND: no vassal named %q", vassalName)), nil
 	}
 

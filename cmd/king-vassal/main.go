@@ -22,6 +22,7 @@ func main() {
 	kingDir := flag.String("king-dir", ".king", "path to .king directory")
 	kingSocket := flag.String("king-sock", "", "path to king daemon socket (auto-discovered if omitted)")
 	timeoutMin := flag.Int("timeout", 10, "task timeout in minutes")
+	model := flag.String("model", "", "claude model to use for task execution (empty = claude default)")
 	stdio := flag.Bool("stdio", false, "serve MCP over stdio (for Claude Code .mcp.json)")
 	flag.Parse()
 
@@ -84,19 +85,21 @@ func main() {
 		"project_type", string(pt),
 	)
 
-	srv := vassal.NewVassalServer(*name, *repoPath, *kingDir, *kingSocket, *timeoutMin, logger)
+	srv := vassal.NewVassalServer(*name, *repoPath, *kingDir, *kingSocket, *timeoutMin, *model, logger)
 
-	// Register with King daemon (best-effort, non-fatal).
+	// Register with King daemon (best-effort, non-fatal, async to avoid deadlock during daemon startup).
 	if *kingSocket != "" {
-		if client, err := daemon.NewClientFromSocket(*kingSocket); err == nil {
-			_, _ = client.Call("vassal.register", map[string]interface{}{
-				"name":      *name,
-				"repo_path": *repoPath,
-				"socket":    filepath.Join(*kingDir, "vassals", *name+".sock"),
-				"pid":       os.Getpid(),
-			})
-			client.Close()
-		}
+		go func() {
+			if client, err := daemon.NewClientFromSocket(*kingSocket); err == nil {
+				_, _ = client.Call("vassal.register", map[string]interface{}{
+					"name":      *name,
+					"repo_path": *repoPath,
+					"socket":    filepath.Join(*kingDir, "vassals", *name+".sock"),
+					"pid":       os.Getpid(),
+				})
+				client.Close()
+			}
+		}()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

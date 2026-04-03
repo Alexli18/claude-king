@@ -152,14 +152,16 @@ func NewVassalClientPool() *VassalClientPool {
 }
 
 // Connect dials a Unix socket at sockPath and registers a new VassalClient
-// under the given name. It returns an error if a client with that name is
-// already registered.
+// under the given name. If a client with that name already exists, it is
+// closed and replaced (idempotent reconnect).
 func (p *VassalClientPool) Connect(name, sockPath string) (*VassalClient, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if _, exists := p.clients[name]; exists {
-		return nil, fmt.Errorf("vassal_client_pool: already connected to %q", name)
+	// Close stale client if present (e.g. vassal process was restarted).
+	if old, exists := p.clients[name]; exists {
+		_ = old.Close()
+		delete(p.clients, name)
 	}
 
 	conn, err := net.Dial("unix", sockPath)
@@ -187,6 +189,18 @@ func (p *VassalClientPool) Get(name string) (*VassalClient, bool) {
 
 	vc, ok := p.clients[name]
 	return vc, ok
+}
+
+// Names returns a sorted list of all connected vassal names.
+func (p *VassalClientPool) Names() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	names := make([]string, 0, len(p.clients))
+	for name := range p.clients {
+		names = append(names, name)
+	}
+	return names
 }
 
 // Disconnect closes the connection for the named vassal and removes it from

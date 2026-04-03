@@ -119,7 +119,7 @@ func Validate(cfg *KingdomConfig) error {
 		if v.Name == "" {
 			return fmt.Errorf("vassal at index %d: name must not be empty", i)
 		}
-		if v.Command == "" && v.Type != "serial" {
+		if v.Command == "" && v.Type != "serial" && v.Type != "claude" {
 			return fmt.Errorf("vassal %q: command must not be empty", v.Name)
 		}
 		if v.Type == "serial" {

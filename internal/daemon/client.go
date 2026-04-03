@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 )
 
 // Client connects to a running daemon via the Unix Domain Socket.
+// Call is safe for concurrent use from multiple goroutines.
 type Client struct {
+	mu      sync.Mutex
 	conn    net.Conn
 	scanner *bufio.Scanner
 	nextID  atomic.Int64
@@ -48,7 +51,11 @@ func NewClientFromSocket(sockPath string) (*Client, error) {
 }
 
 // Call sends a JSON-RPC request and waits for the response.
+// Safe for concurrent use: only one request/response cycle runs at a time.
 func (c *Client) Call(method string, params interface{}) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	id := int(c.nextID.Add(1))
 
 	var rawParams json.RawMessage
