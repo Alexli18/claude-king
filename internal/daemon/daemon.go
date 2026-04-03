@@ -1324,46 +1324,6 @@ func (d *Daemon) registerRealHandlers() {
 		return map[string]string{"status": "shutting_down"}, nil
 	}
 
-	// vassal.register — external vassals (e.g. --stdio mode) register themselves.
-	d.handlers["vassal.register"] = func(params json.RawMessage) (interface{}, error) {
-		var info ExternalVassalInfo
-		if err := json.Unmarshal(params, &info); err != nil {
-			return nil, fmt.Errorf("invalid params: %w", err)
-		}
-		if info.Name == "" {
-			return nil, fmt.Errorf("name is required")
-		}
-		d.externalVassalsMu.Lock()
-		d.externalVassals[info.Name] = info
-		d.externalVassalsMu.Unlock()
-		d.logger.Info("external vassal registered", "name", info.Name, "repo", info.RepoPath)
-		return map[string]bool{"ok": true}, nil
-	}
-
-	// vassal.list — returns external vassals with liveness check.
-	d.handlers["vassal.list"] = func(_ json.RawMessage) (interface{}, error) {
-		d.externalVassalsMu.RLock()
-		defer d.externalVassalsMu.RUnlock()
-		type vassalEntry struct {
-			Name     string `json:"name"`
-			RepoPath string `json:"repo_path"`
-			Socket   string `json:"socket"`
-			PID      int    `json:"pid"`
-			Alive    bool   `json:"alive"`
-		}
-		var result []vassalEntry
-		for _, v := range d.externalVassals {
-			alive := false
-			if proc, err := os.FindProcess(v.PID); err == nil {
-				alive = proc.Signal(syscall.Signal(0)) == nil
-			}
-			result = append(result, vassalEntry{
-				Name: v.Name, RepoPath: v.RepoPath,
-				Socket: v.Socket, PID: v.PID, Alive: alive,
-			})
-		}
-		return map[string]interface{}{"vassals": result}, nil
-	}
 }
 
 // ---------------------------------------------------------------------------
