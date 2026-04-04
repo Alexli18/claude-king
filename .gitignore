@@ -42,6 +42,7 @@ Thumbs.db
 
 # Local dev tooling
 .claude/
+.codex/
 !.claude/skills/king/
 .specify/
 docs/plans/

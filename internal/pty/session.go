@@ -273,7 +273,10 @@ func (s *Session) Start() error {
 // readLoop reads from the PTY master into the ring buffer and invokes the
 // onOutput callback for each complete line.
 func (s *Session) readLoop() {
-	reader := io.TeeReader(s.ptmx, s.outputBuf)
+	s.mu.RLock()
+	ptmx := s.ptmx
+	s.mu.RUnlock()
+	reader := io.TeeReader(ptmx, s.outputBuf)
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 

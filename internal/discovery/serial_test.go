@@ -107,3 +107,23 @@ func TestFindSerialPort_WrongVIDPID(t *testing.T) {
 		t.Fatalf("expected ErrNoSerialDevice for wrong VID:PID, got: %v", err)
 	}
 }
+
+// TestFindSerialPort_OS exercises the OS-dispatch path (FindSerialPort).
+// On macOS it calls findSerialMacOS; on Linux it calls FindSerialPortInRoot("/", ...).
+// Either way, the test just verifies it returns a path or ErrNoSerialDevice.
+func TestFindSerialPort_OSDispatch(t *testing.T) {
+	_, err := discovery.FindSerialPort("any")
+	if err != nil && !errors.Is(err, discovery.ErrNoSerialDevice) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFindSerialPort_OSDispatch_KnownHints(t *testing.T) {
+	hints := []string{"esp32", "ftdi", "gps", "any"}
+	for _, hint := range hints {
+		_, err := discovery.FindSerialPort(hint)
+		if err != nil && !errors.Is(err, discovery.ErrNoSerialDevice) {
+			t.Fatalf("FindSerialPort(%q): unexpected error: %v", hint, err)
+		}
+	}
+}

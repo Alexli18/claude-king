@@ -153,8 +153,9 @@ func (s *VassalServer) handleDispatchTask(_ context.Context, req mcp.CallToolReq
 	// Minor: first check avoids unnecessary I/O.
 	s.mu.Lock()
 	if s.activeTask != nil && (s.activeTask.Status == TaskStatusAccepted || s.activeTask.Status == TaskStatusRunning) {
+		busyMsg := fmt.Sprintf("vassal busy with task %s (status: %s)", s.activeTask.ID, s.activeTask.Status)
 		s.mu.Unlock()
-		return mcp.NewToolResultError(fmt.Sprintf("vassal busy with task %s (status: %s)", s.activeTask.ID, s.activeTask.Status)), nil
+		return mcp.NewToolResultError(busyMsg), nil
 	}
 	s.mu.Unlock()
 
@@ -167,17 +168,19 @@ func (s *VassalServer) handleDispatchTask(_ context.Context, req mcp.CallToolReq
 	// Minor: re-check and set activeTask atomically (authoritative guard).
 	s.mu.Lock()
 	if s.activeTask != nil && (s.activeTask.Status == TaskStatusAccepted || s.activeTask.Status == TaskStatusRunning) {
+		busyMsg := fmt.Sprintf("vassal busy with task %s (status: %s)", s.activeTask.ID, s.activeTask.Status)
 		s.mu.Unlock()
-		return mcp.NewToolResultError(fmt.Sprintf("vassal busy with task %s (status: %s)", s.activeTask.ID, s.activeTask.Status)), nil
+		return mcp.NewToolResultError(busyMsg), nil
 	}
 	s.activeTask = t
 	s.mu.Unlock()
 
+	initialStatus := string(t.Status) // capture before goroutine can mutate
 	go s.runTask(t)
 
 	result, err := json.Marshal(map[string]string{
 		"task_id": t.ID,
-		"status":  string(t.Status),
+		"status":  initialStatus,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
@@ -257,12 +260,12 @@ func (s *VassalServer) runTask(t *Task) {
 
 	// Important 4: guard against zero/negative timeout.
 	if s.timeoutMin <= 0 {
+		s.mu.Lock()
 		t.Status = TaskStatusFailed
 		t.Error = "timeoutMin must be > 0"
-		_ = SaveTask(s.kingDir, t)
-		s.mu.Lock()
 		s.activeTask = nil
 		s.mu.Unlock()
+		_ = SaveTask(s.kingDir, t)
 		return
 	}
 

@@ -296,3 +296,211 @@ func TestValidate_Webhook_EmptyOn_DefaultsAll(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DefaultConfig / DefaultSettings
+// ---------------------------------------------------------------------------
+
+func TestDefaultConfig_HasName(t *testing.T) {
+	cfg := config.DefaultConfig("my-project")
+	if cfg.Name != "my-project" {
+		t.Errorf("expected Name=my-project, got %q", cfg.Name)
+	}
+	if cfg.Vassals == nil {
+		t.Error("expected non-nil Vassals slice")
+	}
+	if len(cfg.Patterns) == 0 {
+		t.Error("expected default patterns to be non-empty")
+	}
+}
+
+func TestDefaultConfig_PatternHasRegex(t *testing.T) {
+	cfg := config.DefaultConfig("k")
+	for _, p := range cfg.Patterns {
+		if p.Regex == "" {
+			t.Errorf("pattern %q has empty regex", p.Name)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadVassalManifest
+// ---------------------------------------------------------------------------
+
+func TestLoadVassalManifest_ValidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vassal.json")
+	content := `{"name":"my-vassal","description":"does stuff","version":"1.0.0"}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	m, err := config.LoadVassalManifest(path)
+	if err != nil {
+		t.Fatalf("LoadVassalManifest: %v", err)
+	}
+	if m.Name != "my-vassal" {
+		t.Errorf("expected Name=my-vassal, got %q", m.Name)
+	}
+}
+
+func TestLoadVassalManifest_FileNotFound(t *testing.T) {
+	_, err := config.LoadVassalManifest("/nonexistent/vassal.json")
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+func TestLoadVassalManifest_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vassal.json")
+	_ = os.WriteFile(path, []byte("not-json{{{"), 0644)
+
+	_, err := config.LoadVassalManifest(path)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VassalConfig methods
+// ---------------------------------------------------------------------------
+
+func TestAutostartOrDefault_NilReturnsTrue(t *testing.T) {
+	v := config.VassalConfig{}
+	if !v.AutostartOrDefault() {
+		t.Error("expected AutostartOrDefault to return true when nil")
+	}
+}
+
+func TestAutostartOrDefault_FalseSet(t *testing.T) {
+	f := false
+	v := config.VassalConfig{Autostart: &f}
+	if v.AutostartOrDefault() {
+		t.Error("expected AutostartOrDefault to return false when set to false")
+	}
+}
+
+func TestAutostartOrDefault_TrueSet(t *testing.T) {
+	tr := true
+	v := config.VassalConfig{Autostart: &tr}
+	if !v.AutostartOrDefault() {
+		t.Error("expected AutostartOrDefault to return true when set to true")
+	}
+}
+
+func TestTypeOrDefault_EmptyReturnsShell(t *testing.T) {
+	v := config.VassalConfig{}
+	if v.TypeOrDefault() != "shell" {
+		t.Errorf("expected 'shell', got %q", v.TypeOrDefault())
+	}
+}
+
+func TestTypeOrDefault_SetValue(t *testing.T) {
+	v := config.VassalConfig{Type: "claude"}
+	if v.TypeOrDefault() != "claude" {
+		t.Errorf("expected 'claude', got %q", v.TypeOrDefault())
+	}
+}
+
+func TestBaudRateOrDefault_ZeroReturns115200(t *testing.T) {
+	v := config.VassalConfig{}
+	if v.BaudRateOrDefault() != 115200 {
+		t.Errorf("expected 115200, got %d", v.BaudRateOrDefault())
+	}
+}
+
+func TestBaudRateOrDefault_SetValue(t *testing.T) {
+	v := config.VassalConfig{BaudRate: 9600}
+	if v.BaudRateOrDefault() != 9600 {
+		t.Errorf("expected 9600, got %d", v.BaudRateOrDefault())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Validate — data_rate guard with min_bytes_per_sec
+// ---------------------------------------------------------------------------
+
+func TestValidate_DataRate_ValidKbps(t *testing.T) {
+	v := baseVassal("stream")
+	v.Guards = []config.GuardConfig{{Type: "data_rate", Min: "100kbps"}}
+	cfg := &config.KingdomConfig{Name: "k", Vassals: []config.VassalConfig{v}}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_DataRate_ValidMbps(t *testing.T) {
+	v := baseVassal("stream")
+	v.Guards = []config.GuardConfig{{Type: "data_rate", Min: "1.5mbps"}}
+	cfg := &config.KingdomConfig{Name: "k", Vassals: []config.VassalConfig{v}}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_DataRate_ValidBps(t *testing.T) {
+	v := baseVassal("stream")
+	v.Guards = []config.GuardConfig{{Type: "data_rate", Min: "500bps"}}
+	cfg := &config.KingdomConfig{Name: "k", Vassals: []config.VassalConfig{v}}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_DataRate_InvalidMin(t *testing.T) {
+	v := baseVassal("stream")
+	v.Guards = []config.GuardConfig{{Type: "data_rate", Min: "notvalid"}}
+	cfg := &config.KingdomConfig{Name: "k", Vassals: []config.VassalConfig{v}}
+	if err := config.Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid min format")
+	}
+}
+
+func TestValidate_DataRate_NoMin_RequiresMin(t *testing.T) {
+	v := baseVassal("stream")
+	v.Guards = []config.GuardConfig{{Type: "data_rate"}}
+	cfg := &config.KingdomConfig{Name: "k", Vassals: []config.VassalConfig{v}}
+	if err := config.Validate(cfg); err == nil {
+		t.Fatal("expected error for data_rate without min, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadConfig — missing and invalid YAML
+// ---------------------------------------------------------------------------
+
+func TestLoadConfig_FileNotFound(t *testing.T) {
+	_, err := config.LoadConfig("/nonexistent/path/kingdom.yml")
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+func TestLoadConfig_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kingdom.yml")
+	_ = os.WriteFile(path, []byte("{invalid: yaml: [[["), 0644)
+	_, err := config.LoadConfig(path)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML, got nil")
+	}
+}
+
+func TestLoadConfig_ValidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kingdom.yml")
+	yaml := "name: my-kingdom\nvassals:\n  - name: shell\n    command: /bin/sh\n"
+	_ = os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Name != "my-kingdom" {
+		t.Errorf("expected name=my-kingdom, got %q", cfg.Name)
+	}
+	if !strings.Contains(cfg.Vassals[0].Name, "shell") {
+		t.Errorf("expected vassal named 'shell', got %q", cfg.Vassals[0].Name)
+	}
+}
