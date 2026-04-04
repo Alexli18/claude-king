@@ -210,10 +210,32 @@ Claude King is designed to reduce a specific set of risks that emerge when AI co
 **What King does not currently guarantee:**
 - Sandboxed or containerized command execution
 - Network isolation between vassal processes
-- Secret scanning of `exec_in` output, event payloads, or task descriptions
+- Secret scanning of event payloads or task descriptions (exec_in output IS scanned by default)
 - OS-level privilege separation between the daemon and vassals
 
 For a full threat model and planned hardening roadmap, see [`security-research/`](security-research/) and [`docs/secure-bash-roadmap.md`](docs/secure-bash-roadmap.md).
+
+---
+
+## Security Quickstart
+
+**What is enabled by default:**
+- `exec_in` output is scanned for secrets (AWS keys, GitHub tokens, private keys). If a secret is detected, the command output is blocked and the agent receives `SENSITIVE_OUTPUT_BLOCKED`.
+- A warning is logged at daemon startup if `sovereign_approval` is not configured.
+
+**What you should enable before running agents you don't fully trust:**
+
+```yaml
+# kingdom.yml
+settings:
+  sovereign_approval: true        # require human approval for every exec_in command
+  sovereign_approval_timeout: 300 # seconds before auto-reject (default: 300)
+  scan_exec_output: true          # scan exec_in output for secrets (default: true, shown for clarity)
+```
+
+**What is not covered:** event payloads, task descriptions, and `dispatch_task` arguments are not scanned. No network isolation or OS-level sandboxing.
+
+See [`security-research/`](security-research/) for the full threat model.
 
 ---
 
@@ -222,7 +244,7 @@ For a full threat model and planned hardening roadmap, see [`security-research/`
 | Threat | Current mitigation | Gap |
 |--------|-------------------|-----|
 | **Command injection via exec_in** | Optional sovereign approval gate (`internal/daemon/daemon.go`) | Not enforced by default; no command denylist |
-| **Secret leakage via artifacts** | Regex scanner on Ledger writes (`internal/security/scanner.go`) | exec_in output, event payloads not scanned |
+| **Secret leakage via artifacts** | Regex scanner on Ledger writes + exec_in output (`internal/security/scanner.go`) | Event payloads, task descriptions not scanned |
 | **Unsafe artifact storage** | Secret scanner blocks before SQLite write | No encryption at rest; SQLite is world-readable |
 | **Weak approval coverage** | exec_in gated when sovereign_approval configured | dispatch_task, register_artifact have no approval gate |
 | **Local trust-boundary assumptions** | Daemon runs with user's OS privileges | No isolation between King daemon and vassal processes |
