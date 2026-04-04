@@ -83,3 +83,50 @@ func TestExecIn_Timeout(t *testing.T) {
 	}
 	t.Logf("timeout returned in %v", elapsed)
 }
+
+func TestGetEvents_AfterPatternMatch(t *testing.T) {
+	td := startDaemon(t, eventKingdom())
+	time.Sleep(300 * time.Millisecond)
+
+	// Emit output that matches the configured pattern "KING_TEST_EVENT"
+	td.call(t, "exec_in", map[string]interface{}{
+		"target":          "shell",
+		"command":         "echo KING_TEST_EVENT",
+		"timeout_seconds": 5,
+	})
+
+	// Give the sieve a moment to process and persist the event
+	time.Sleep(500 * time.Millisecond)
+
+	raw := td.call(t, "get_events", map[string]interface{}{
+		"severity": "error",
+		"limit":    10,
+	})
+
+	var resp struct {
+		Events []struct {
+			Source   string `json:"source"`
+			Severity string `json:"severity"`
+			Summary  string `json:"summary"`
+			Pattern  string `json:"pattern"`
+		} `json:"events"`
+		Count int `json:"count"`
+	}
+	mustUnmarshal(t, raw, &resp)
+
+	if resp.Count == 0 {
+		t.Fatal("expected at least one event after pattern match, got 0")
+	}
+
+	found := false
+	for _, e := range resp.Events {
+		if e.Pattern == "test-pattern" && e.Severity == "error" {
+			found = true
+			t.Logf("found event: source=%s severity=%s summary=%q", e.Source, e.Severity, e.Summary)
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected event with pattern=test-pattern, got: %+v", resp.Events)
+	}
+}
