@@ -235,6 +235,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	d.logger.Info("config loaded", "name", d.config.Name, "vassals", len(d.config.Vassals))
+	if !d.config.Settings.SovereignApproval {
+		d.logger.Warn("sovereign_approval is not configured — exec_in commands run without human approval; set sovereign_approval: true in kingdom.yml to enable")
+	}
 
 	// Validate config.
 	if err := config.Validate(d.config); err != nil {
