@@ -187,9 +187,25 @@ patterns:
     regex: "FAIL|fatal error:"
     severity: error
     summary_template: "Build failure in {vassal}: {match}"
+
+settings:
+  webhooks:
+    - url: https://hooks.slack.com/services/...
+      on: [error, critical, guard_circuit_open]
+      # secret: mysecret   # enables HMAC-SHA256 X-King-Signature header
+    - url: https://ci.example.com/king
+      on: [guard_circuit_open, guard_circuit_closed]
+      headers:
+        Authorization: "Bearer mytoken"
 ```
 
 Run `king up` — King starts `api` and `firmware` automatically, monitors both, and Claude gets live events.
+
+Test webhook delivery:
+```bash
+king webhook test https://hooks.example.com/abc
+king webhook test https://hooks.example.com/abc --secret mysecret
+```
 
 ---
 
@@ -371,7 +387,7 @@ No config required.
 - [x] Health guards with circuit breaker (`guard_status`)
 - [x] Prebuilt binaries via GitHub Releases
 - [x] Multi-AI vassals — Claude Code, OpenAI Codex, Google Gemini under one control plane
-- [ ] Event webhooks
+- [x] Event webhooks (HTTP POST with HMAC signing, retry, filtering)
 - [ ] `king doctor` — full diagnostic output
 
 ---
