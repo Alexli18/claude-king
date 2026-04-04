@@ -128,3 +128,39 @@ func TestScan_SkipsContentScanForLargeFile(t *testing.T) {
 		t.Errorf("expected Blocked=false, got reason: %s", result.Reason)
 	}
 }
+
+// --- ScanContent tests ---
+
+func TestScanContent_BlocksAWSAccessKey(t *testing.T) {
+	content := "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nsome other line"
+	result := security.ScanContent(content)
+	if !result.Blocked {
+		t.Error("expected Blocked=true for AWS access key in content")
+	}
+	if result.Reason != "AWS_KEY_DETECTED" {
+		t.Errorf("expected reason AWS_KEY_DETECTED, got %q", result.Reason)
+	}
+}
+
+func TestScanContent_BlocksGitHubToken(t *testing.T) {
+	content := "token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+	result := security.ScanContent(content)
+	if !result.Blocked {
+		t.Error("expected Blocked=true for GitHub token in content")
+	}
+}
+
+func TestScanContent_CleanContentPasses(t *testing.T) {
+	content := "hello world\nno secrets here\nfoo=bar"
+	result := security.ScanContent(content)
+	if result.Blocked {
+		t.Errorf("expected Blocked=false for clean content, got reason %q", result.Reason)
+	}
+}
+
+func TestScanContent_EmptyStringPasses(t *testing.T) {
+	result := security.ScanContent("")
+	if result.Blocked {
+		t.Errorf("expected Blocked=false for empty string, got reason %q", result.Reason)
+	}
+}

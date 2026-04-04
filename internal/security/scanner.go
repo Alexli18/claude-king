@@ -129,3 +129,17 @@ func Scan(filePath string) ScanResult {
 
 	return ScanResult{Blocked: false}
 }
+
+// ScanContent scans an in-memory string for secret patterns.
+// It applies only content regex patterns (no filename or extension checks).
+// Use this to scan command output, task descriptions, or other string payloads.
+func ScanContent(content string) ScanResult {
+	for _, line := range strings.Split(content, "\n") {
+		for _, sp := range secretPatterns {
+			if sp.re.MatchString(line) {
+				return ScanResult{Blocked: true, Reason: sp.reason}
+			}
+		}
+	}
+	return ScanResult{Blocked: false}
+}
