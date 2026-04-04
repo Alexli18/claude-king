@@ -184,6 +184,34 @@ func TestValidate_RejectsUnknownAutoHint(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_CodexGeminiVassals(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Vassals: []config.VassalConfig{
+			{Name: "coder", Type: "codex"},
+			{Name: "analyst", Type: "gemini", Model: "gemini-2.0-flash"},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("expected codex/gemini vassals to be valid, got: %v", err)
+	}
+}
+
+func TestValidateConfig_CodexGemini_Specialization(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Vassals: []config.VassalConfig{
+			{Name: "coder", Type: "codex", Specialization: "TypeScript, React"},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if cfg.Vassals[0].Specialization != "TypeScript, React" {
+		t.Error("specialization not preserved")
+	}
+}
+
 func TestLoadOrCreateConfig_WritesEmptyVassals(t *testing.T) {
 	rootDir := t.TempDir()
 

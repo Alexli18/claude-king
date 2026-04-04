@@ -20,12 +20,13 @@ type VassalConfig struct {
 	Env           map[string]string `yaml:"env,omitempty"`
 	Autostart     *bool             `yaml:"autostart,omitempty"`
 	RestartPolicy string            `yaml:"restart_policy,omitempty"`
-	Type          string            `yaml:"type,omitempty"`     // "shell" (default) | "claude"
+	Type          string            `yaml:"type,omitempty"`     // "shell" (default) | "claude" | "codex" | "gemini" | "serial"
 	Host          string            `yaml:"host,omitempty"`     // SSH host for remote vassals (future use)
 	SSHUser       string            `yaml:"ssh_user,omitempty"` // SSH user (future use)
 
-	// Claude-specific (only used when Type == "claude")
-	Model string `yaml:"model,omitempty"` // e.g. "claude-opus-4-6", "claude-haiku-4-5-20251001"
+	// AI vassal fields (used when Type == "claude" | "codex" | "gemini")
+	Model          string `yaml:"model,omitempty"`          // e.g. "claude-opus-4-6", "o4-mini", "gemini-2.0-flash"
+	Specialization string `yaml:"specialization,omitempty"` // routing hint for sovereign, e.g. "TypeScript, React"
 
 	// Serial-specific (only used when Type == "serial")
 	SerialPort     string `yaml:"serial_port,omitempty"`
