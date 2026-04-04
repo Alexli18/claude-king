@@ -1,6 +1,6 @@
 module github.com/alexli18/claude-king
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
