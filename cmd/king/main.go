@@ -14,9 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alexli18/claude-king/internal/config"
 	"github.com/alexli18/claude-king/internal/daemon"
 	"github.com/alexli18/claude-king/internal/registry"
 	"github.com/alexli18/claude-king/internal/tui"
+	"github.com/alexli18/claude-king/internal/webhook"
 )
 
 // version is injected at build time via -X main.version=<tag>
@@ -45,6 +47,8 @@ func main() {
 		cmdPromptInfo()
 	case "doctor":
 		cmdDoctor()
+	case "webhook":
+		cmdWebhook()
 	case "version", "--version":
 		fmt.Println("king version", version)
 	default:
@@ -644,4 +648,26 @@ func cmdDoctor() {
 		fmt.Println("Some checks failed — see hints above.")
 		os.Exit(1)
 	}
+}
+
+func cmdWebhook() {
+	args := os.Args[2:]
+	if len(args) < 2 || args[0] != "test" {
+		fmt.Fprintln(os.Stderr, "usage: king webhook test <url> [--secret <secret>]")
+		os.Exit(1)
+	}
+	url := args[1]
+	secret := ""
+	for i := 2; i < len(args)-1; i++ {
+		if args[i] == "--secret" {
+			secret = args[i+1]
+		}
+	}
+	hooks := []config.WebhookConfig{{URL: url, Secret: secret, MaxRetries: 1, TimeoutSec: 10}}
+	d := webhook.NewDispatcher(hooks, "test", nil)
+	if err := d.Test(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("webhook test delivered successfully")
 }
