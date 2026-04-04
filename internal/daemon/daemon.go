@@ -369,6 +369,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.config.Settings.SovereignApproval,
 		d.config.Settings.SovereignApprovalTimeout,
 	)
+	d.mcpSrv.SetScanExecOutput(d.config.Settings.ScanExecOutput)
 
 	// Wire VassalClientPool into MCP server for dispatch_task/get_task_status/abort_task.
 	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
@@ -464,6 +465,7 @@ func (d *Daemon) Attach(ctx context.Context) error {
 	adapter := &ptyManagerAdapter{mgr: d.ptyMgr}
 	d.mcpSrv = mcp.NewServer(adapter, d.store, ledger, d.kingdom.ID, d.rootDir, d.logger.With("component", "mcp"))
 	d.mcpSrv.SetApprovalManager(d.approvalMgr, d.config.Settings.SovereignApproval, d.config.Settings.SovereignApprovalTimeout)
+	d.mcpSrv.SetScanExecOutput(d.config.Settings.ScanExecOutput)
 	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
 
 	d.wg.Add(1)

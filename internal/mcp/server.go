@@ -100,6 +100,8 @@ type Server struct {
 	sovereignApproval        bool
 	sovereignApprovalTimeout int // seconds
 
+	scanExecOutput bool
+
 	parentKingdomSocket string // non-empty if this MCP runs inside another kingdom
 	inObserverMode      bool
 
@@ -144,6 +146,11 @@ func (s *Server) SetApprovalManager(mgr ApprovalManager, sovereignApproval bool,
 	s.approvalMgr = mgr
 	s.sovereignApproval = sovereignApproval
 	s.sovereignApprovalTimeout = timeoutSec
+}
+
+// SetScanExecOutput configures whether exec_in output is scanned for secrets.
+func (s *Server) SetScanExecOutput(enabled bool) {
+	s.scanExecOutput = enabled
 }
 
 // SetVassalPool wires a VassalPool into the server so that dispatch_task,

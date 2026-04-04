@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexli18/claude-king/internal/artifacts"
 	"github.com/alexli18/claude-king/internal/audit"
+	"github.com/alexli18/claude-king/internal/security"
 	"github.com/alexli18/claude-king/internal/store"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -151,6 +152,14 @@ func (s *Server) handleExecIn(_ context.Context, request mcp.CallToolRequest) (*
 			return mcp.NewToolResultError(fmt.Sprintf("TIMEOUT: command timed out after %v", timeout)), nil
 		}
 		return mcp.NewToolResultError(fmt.Sprintf("EXEC_ERROR: %v", err)), nil
+	}
+
+	// Scan output for secrets if configured.
+	if s.scanExecOutput {
+		if scanResult := security.ScanContent(output); scanResult.Blocked {
+			return mcp.NewToolResultError(
+				fmt.Sprintf("SENSITIVE_OUTPUT_BLOCKED: %s", scanResult.Reason)), nil
+		}
 	}
 
 	result := map[string]any{
