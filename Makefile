@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt clean install install-user uninstall uninstall-user
+.PHONY: build test test-integration test-all vet fmt clean install install-user uninstall uninstall-user
 
 BINDIR ?= .
 SYSTEM_BINDIR = /usr/local/bin
@@ -41,6 +41,11 @@ uninstall-user:
 
 test:
 	go test ./... -race -timeout 60s
+
+test-integration:
+	go test ./tests/integration/ -tags integration -v -timeout 120s
+
+test-all: test test-integration
 
 vet:
 	go vet ./...
