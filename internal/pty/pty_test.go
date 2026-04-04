@@ -382,7 +382,7 @@ func TestSession_GetOutput_EmptyBeforeStart(t *testing.T) {
 }
 
 func TestSession_GetOutput_AfterCommand(t *testing.T) {
-	s, err := pty.NewSession(uuid.New().String(), "bash-test", "/bin/bash", "/tmp", nil)
+	s, err := pty.NewSession(uuid.New().String(), "sh-test", "/bin/sh", "/tmp", nil)
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
