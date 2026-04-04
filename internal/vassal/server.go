@@ -1,7 +1,6 @@
 package vassal
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -25,7 +23,7 @@ type VassalServer struct {
 	kingDir    string
 	kingSocket string
 	timeoutMin int
-	model      string // claude model to use for task execution (empty = claude default)
+	executor   AIExecutor // AI executor for task execution
 	logger     *slog.Logger
 
 	mu         sync.Mutex
@@ -35,14 +33,14 @@ type VassalServer struct {
 }
 
 // NewVassalServer creates a new VassalServer.
-func NewVassalServer(name, repoPath, kingDir, kingSocket string, timeoutMin int, model string, logger *slog.Logger) *VassalServer {
+func NewVassalServer(name, repoPath, kingDir, kingSocket string, timeoutMin int, executor AIExecutor, logger *slog.Logger) *VassalServer {
 	return &VassalServer{
 		name:       name,
 		repoPath:   repoPath,
 		kingDir:    kingDir,
 		kingSocket: kingSocket,
 		timeoutMin: timeoutMin,
-		model:      model,
+		executor:   executor,
 		logger:     logger,
 	}
 }
@@ -294,24 +292,7 @@ func (s *VassalServer) runTask(t *Task) {
 	s.taskCancel = cancel
 	s.mu.Unlock()
 
-	args := []string{
-		"-p", prompt,
-		"--dangerously-skip-permissions",
-		"--output-format", "text",
-		"--mcp-config", `{"mcpServers":{}}`,
-		"--strict-mcp-config",
-	}
-	if s.model != "" {
-		args = append(args, "--model", s.model)
-	}
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.Dir = s.repoPath
-
-	// Important 5: capture stderr so it can be included in error messages.
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	out, err := cmd.Output()
+	out, stderrBytes, err := s.executor.RunTask(ctx, prompt, s.repoPath)
 
 	// Important 3: do LoadTask outside the lock to avoid blocking under I/O.
 	current, loadErr := LoadTask(s.kingDir, t.ID)
@@ -338,8 +319,8 @@ func (s *VassalServer) runTask(t *Task) {
 		// Important 5: include stderr in the error message.
 		t.Status = TaskStatusFailed
 		errMsg := err.Error()
-		if stderrBuf.Len() > 0 {
-			errMsg = fmt.Sprintf("%s: %s", errMsg, stderrBuf.String())
+		if len(stderrBytes) > 0 {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, string(stderrBytes))
 		}
 		t.Error = errMsg
 		t.Output = string(out)
