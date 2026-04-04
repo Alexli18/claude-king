@@ -83,6 +83,12 @@ type VassalPool interface {
 	Names() []string
 }
 
+// VassalMeta holds config-derived metadata for a vassal, used by MCP tools.
+type VassalMeta struct {
+	Type           string // "claude" | "codex" | "gemini" | "shell"
+	Specialization string // routing hint for sovereign
+}
+
 // Server wraps the mcp-go MCPServer and holds references to internal services
 // needed by tool handlers.
 type Server struct {
@@ -107,6 +113,9 @@ type Server struct {
 
 	activeHeartbeats map[string]context.CancelFunc
 	heartbeatMu      sync.Mutex
+
+	vassalMeta   map[string]VassalMeta
+	vassalMetaMu sync.RWMutex
 }
 
 // NewServer creates a new MCP Server with the given dependencies.
@@ -158,6 +167,24 @@ func (s *Server) SetScanExecOutput(enabled bool) {
 // Call this after creation when vassal pool is available.
 func (s *Server) SetVassalPool(pool VassalPool) {
 	s.vassalPool = pool
+}
+
+// SetVassalMeta stores config-derived metadata for vassals, used by list_vassals.
+// Called by the daemon after loading kingdom config.
+func (s *Server) SetVassalMeta(meta map[string]VassalMeta) {
+	s.vassalMetaMu.Lock()
+	s.vassalMeta = meta
+	s.vassalMetaMu.Unlock()
+}
+
+func (s *Server) getVassalMeta(name string) (VassalMeta, bool) {
+	s.vassalMetaMu.RLock()
+	defer s.vassalMetaMu.RUnlock()
+	if s.vassalMeta == nil {
+		return VassalMeta{}, false
+	}
+	meta, ok := s.vassalMeta[name]
+	return meta, ok
 }
 
 // Start starts the MCP server on the stdio transport. It blocks until the

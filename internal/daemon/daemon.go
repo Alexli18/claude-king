@@ -378,6 +378,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// Wire VassalClientPool into MCP server for dispatch_task/get_task_status/abort_task.
 	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
 
+	// Populate vassal metadata for list_vassals routing hints.
+	vassalMeta := make(map[string]mcp.VassalMeta, len(d.config.Vassals))
+	for _, v := range d.config.Vassals {
+		vassalMeta[v.Name] = mcp.VassalMeta{
+			Type:           v.TypeOrDefault(),
+			Specialization: v.Specialization,
+		}
+	}
+	d.mcpSrv.SetVassalMeta(vassalMeta)
+
 	// Update RPC handlers to use real implementations.
 	d.registerRealHandlers()
 
@@ -471,6 +481,16 @@ func (d *Daemon) Attach(ctx context.Context) error {
 	d.mcpSrv.SetApprovalManager(d.approvalMgr, d.config.Settings.SovereignApproval, d.config.Settings.SovereignApprovalTimeout)
 	d.mcpSrv.SetScanExecOutput(d.config.Settings.ScanExecOutput)
 	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
+
+	// Populate vassal metadata for list_vassals routing hints.
+	vassalMeta2 := make(map[string]mcp.VassalMeta, len(d.config.Vassals))
+	for _, v := range d.config.Vassals {
+		vassalMeta2[v.Name] = mcp.VassalMeta{
+			Type:           v.TypeOrDefault(),
+			Specialization: v.Specialization,
+		}
+	}
+	d.mcpSrv.SetVassalMeta(vassalMeta2)
 
 	d.wg.Add(1)
 	go d.auditCleanupLoop()

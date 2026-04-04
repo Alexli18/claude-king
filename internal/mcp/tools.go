@@ -31,12 +31,13 @@ func (s *Server) handleListVassals(_ context.Context, _ mcp.CallToolRequest) (*m
 	s.logger.Debug("handling list_vassals call")
 
 	type vassalEntry struct {
-		Name         string `json:"name"`
-		Type         string `json:"type"`
-		Status       string `json:"status"`
-		Command      string `json:"command,omitempty"`
-		PID          int    `json:"pid,omitempty"`
-		LastActivity string `json:"last_activity,omitempty"`
+		Name           string `json:"name"`
+		Type           string `json:"type"`
+		Status         string `json:"status"`
+		Command        string `json:"command,omitempty"`
+		PID            int    `json:"pid,omitempty"`
+		LastActivity   string `json:"last_activity,omitempty"`
+		Specialization string `json:"specialization,omitempty"`
 	}
 
 	// Gather live session info from the PTY manager (shell vassals).
@@ -53,7 +54,7 @@ func (s *Server) handleListVassals(_ context.Context, _ mcp.CallToolRequest) (*m
 		})
 	}
 
-	// Add claude vassals from the vassal pool.
+	// Add AI vassals from the vassal pool.
 	if s.vassalPool != nil {
 		ptyNames := make(map[string]bool, len(sessions))
 		for _, sess := range sessions {
@@ -61,10 +62,17 @@ func (s *Server) handleListVassals(_ context.Context, _ mcp.CallToolRequest) (*m
 		}
 		for _, name := range s.vassalPool.Names() {
 			if !ptyNames[name] {
+				vassalType := "claude"
+				specialization := ""
+				if meta, ok := s.getVassalMeta(name); ok {
+					vassalType = meta.Type
+					specialization = meta.Specialization
+				}
 				vassals = append(vassals, vassalEntry{
-					Name:   name,
-					Type:   "claude",
-					Status: "running",
+					Name:           name,
+					Type:           vassalType,
+					Status:         "running",
+					Specialization: specialization,
 				})
 			}
 		}
