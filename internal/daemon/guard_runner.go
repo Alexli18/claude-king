@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"regexp"
+	"syscall"
 	"time"
 
 	"github.com/alexli18/claude-king/internal/webhook"
@@ -178,6 +179,20 @@ func checkHealthScript(execPath string, timeout time.Duration, rootDir string) G
 
 	cmd := exec.CommandContext(ctx, execPath)
 	cmd.Dir = rootDir
+	// Put the script in its own process group so that child processes (e.g.
+	// `sleep N` spawned by a shell script) are also killed when the context
+	// deadline fires — otherwise they hold the pipe open and CombinedOutput
+	// blocks until the child exits naturally.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			// Kill the entire process group (negative PID).
+			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err == nil {
+				return nil
+			}
+		}
+		return cmd.Process.Kill()
+	}
 	out, err := cmd.CombinedOutput()
 	now := time.Now()
 

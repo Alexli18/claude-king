@@ -82,11 +82,14 @@ func (m *Manager) CreateSession(id, name, command, cwd string, env map[string]st
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
+	// Snapshot PID before background goroutines can zero it on fast exit.
+	pid := session.PID
+
 	// Update the store with PID and running status.
-	if err := m.store.UpdateVassalPID(id, session.PID); err != nil {
+	if err := m.store.UpdateVassalPID(id, pid); err != nil {
 		m.logger.Warn("failed to update vassal PID in store",
 			slog.String("name", name),
-			slog.Int("pid", session.PID),
+			slog.Int("pid", pid),
 			slog.String("error", err.Error()),
 		)
 	}
@@ -103,7 +106,7 @@ func (m *Manager) CreateSession(id, name, command, cwd string, env map[string]st
 	m.logger.Info("session created",
 		slog.String("name", name),
 		slog.String("command", command),
-		slog.Int("pid", session.PID),
+		slog.Int("pid", pid),
 	)
 
 	// Monitor session exit in the background and update store.
