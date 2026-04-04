@@ -45,5 +45,6 @@ Thumbs.db
 !.claude/skills/king/
 .specify/
 docs/plans/
+!docs/plans/*-design.md
 CLAUDE.md
 prd.md
