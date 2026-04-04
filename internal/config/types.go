@@ -106,6 +106,7 @@ type Settings struct {
 	AuditIngestionRetentionDays int  `yaml:"audit_ingestion_retention_days,omitempty"`
 	SovereignApproval           bool `yaml:"sovereign_approval,omitempty"`
 	SovereignApprovalTimeout    int  `yaml:"sovereign_approval_timeout,omitempty"`
+	ScanExecOutput              bool `yaml:"scan_exec_output,omitempty"`
 	AuditMaxTraceOutput         int  `yaml:"audit_max_trace_output,omitempty"`
 
 	DefaultModel        string   `yaml:"default_model,omitempty"` // default model for all claude vassals
@@ -125,6 +126,7 @@ func DefaultSettings() Settings {
 		AuditIngestionRetentionDays: 1,
 		SovereignApproval:           false,
 		SovereignApprovalTimeout:    300,
+		ScanExecOutput:              true,
 		AuditMaxTraceOutput:         10000,
 	}
 }
