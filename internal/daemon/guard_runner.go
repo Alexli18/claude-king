@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"regexp"
 	"time"
+
+	"github.com/alexli18/claude-king/internal/webhook"
 )
 
 // ansiStrip removes ANSI escape sequences so log_watch patterns match
@@ -216,6 +218,14 @@ func (d *Daemon) updateGuardState(key string, result GuardResult, threshold int)
 				"guard_type", gs.GuardType,
 				"guard_index", gs.GuardIndex,
 			)
+			if d.webhookDispatcher != nil {
+				d.webhookDispatcher.Send(webhook.Payload{
+					Vassal:   gs.VassalName,
+					Event:    "guard_circuit_closed",
+					Severity: "info",
+					Summary:  fmt.Sprintf("guard %s on vassal %s recovered", gs.GuardType, gs.VassalName),
+				})
+			}
 		}
 	} else {
 		gs.ConsecutiveFails++
@@ -227,6 +237,14 @@ func (d *Daemon) updateGuardState(key string, result GuardResult, threshold int)
 				"guard_index", gs.GuardIndex,
 				"fails", gs.ConsecutiveFails,
 			)
+			if d.webhookDispatcher != nil {
+				d.webhookDispatcher.Send(webhook.Payload{
+					Vassal:   gs.VassalName,
+					Event:    "guard_circuit_open",
+					Severity: "error",
+					Summary:  fmt.Sprintf("guard %s on vassal %s opened after %d failures", gs.GuardType, gs.VassalName, gs.ConsecutiveFails),
+				})
+			}
 		}
 	}
 }

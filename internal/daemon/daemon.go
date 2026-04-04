@@ -29,6 +29,7 @@ import (
 	"github.com/alexli18/claude-king/internal/mcp"
 	"github.com/alexli18/claude-king/internal/pty"
 	"github.com/alexli18/claude-king/internal/store"
+	"github.com/alexli18/claude-king/internal/webhook"
 	"github.com/google/uuid"
 )
 
@@ -155,6 +156,7 @@ type Daemon struct {
 	delegationMu      sync.RWMutex
 	guardStates       map[string]*GuardState
 	guardStatesMu     sync.RWMutex
+	webhookDispatcher *webhook.Dispatcher
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -313,6 +315,30 @@ func (d *Daemon) Start(ctx context.Context) error {
 	d.sieve = events.NewSieve(compiledPatterns, d.store, d.kingdom.ID,
 		d.config.Settings.EventCooldownSeconds, d.logger.With("component", "sieve"))
 
+	// Initialize webhook dispatcher if any webhooks are configured.
+	if len(d.config.Settings.Webhooks) > 0 {
+		d.webhookDispatcher = webhook.NewDispatcher(
+			d.config.Settings.Webhooks,
+			d.config.Name,
+			d.logger.With("component", "webhook"),
+		)
+		d.webhookDispatcher.Start()
+		// Subscribe to sieve events.
+		d.sieve.Subscribe(func(e store.Event) {
+			vassalName := ""
+			if v, err := d.store.GetVassal(e.SourceID); err == nil && v != nil {
+				vassalName = v.Name
+			}
+			d.webhookDispatcher.Send(webhook.Payload{
+				Kingdom:  d.config.Name,
+				Vassal:   vassalName,
+				Event:    e.Pattern,
+				Severity: e.Severity,
+				Summary:  e.Summary,
+			})
+		})
+	}
+
 	// Create AuditRecorder.
 	d.auditRecorder = audit.NewAuditRecorder(d.store, d.kingdom.ID, d.logger.With("component", "audit"))
 
@@ -455,6 +481,31 @@ func (d *Daemon) Attach(ctx context.Context) error {
 	compiledPatterns, _ := events.CompilePatterns(d.config.Patterns)
 	d.sieve = events.NewSieve(compiledPatterns, d.store, d.kingdom.ID,
 		d.config.Settings.EventCooldownSeconds, d.logger.With("component", "sieve"))
+
+	// Initialize webhook dispatcher if any webhooks are configured.
+	if len(d.config.Settings.Webhooks) > 0 {
+		d.webhookDispatcher = webhook.NewDispatcher(
+			d.config.Settings.Webhooks,
+			d.config.Name,
+			d.logger.With("component", "webhook"),
+		)
+		d.webhookDispatcher.Start()
+		// Subscribe to sieve events.
+		d.sieve.Subscribe(func(e store.Event) {
+			vassalName := ""
+			if v, err := d.store.GetVassal(e.SourceID); err == nil && v != nil {
+				vassalName = v.Name
+			}
+			d.webhookDispatcher.Send(webhook.Payload{
+				Kingdom:  d.config.Name,
+				Vassal:   vassalName,
+				Event:    e.Pattern,
+				Severity: e.Severity,
+				Summary:  e.Summary,
+			})
+		})
+	}
+
 	d.auditRecorder = audit.NewAuditRecorder(d.store, d.kingdom.ID, d.logger.With("component", "audit"))
 	d.approvalMgr = audit.NewApprovalManager()
 
@@ -889,6 +940,11 @@ func (d *Daemon) MCPServer() *mcp.Server {
 //  6. Set status to "stopped"
 func (d *Daemon) Stop() error {
 	d.logger.Info("daemon stopping")
+
+	// Stop webhook dispatcher (drain queue before shutting down).
+	if d.webhookDispatcher != nil {
+		d.webhookDispatcher.Stop()
+	}
 
 	// Step 1: Set kingdom status to "stopping".
 	if d.kingdom != nil {
