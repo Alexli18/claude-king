@@ -348,15 +348,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return fmt.Errorf("start vassals: %w", err)
 	}
 
-	// Launch king-vassal subprocesses for claude-type vassals.
+	// Launch king-vassal subprocesses for AI-type vassals.
 	for _, v := range d.config.Vassals {
-		if v.TypeOrDefault() == "claude" {
-			if err := d.startClaudeVassal(v); err != nil {
+		switch v.TypeOrDefault() {
+		case "claude", "codex", "gemini":
+			if err := d.startAIVassal(v); err != nil {
 				d.listener.Close()
 				os.Remove(d.sockPath)
 				d.removePIDFile()
 				d.store.Close()
-				return fmt.Errorf("start claude vassal %q: %w", v.Name, err)
+				return fmt.Errorf("start %s vassal %q: %w", v.TypeOrDefault(), v.Name, err)
 			}
 		}
 	}
@@ -531,11 +532,12 @@ func expandSerialCommand(v config.VassalConfig) string {
 }
 
 // startVassals creates PTY sessions for all autostart shell-type vassals in config (T014).
-// Claude-type vassals are managed separately by startClaudeVassal.
+// AI-type vassals (claude/codex/gemini) are managed separately by startAIVassal.
 func (d *Daemon) startVassals() error {
 	for _, vc := range d.config.Vassals {
-		if vc.TypeOrDefault() == "claude" {
-			continue // managed by startClaudeVassal
+		switch vc.TypeOrDefault() {
+		case "claude", "codex", "gemini":
+			continue // managed by startAIVassal
 		}
 		if !vc.AutostartOrDefault() {
 			d.logger.Info("skipping non-autostart vassal", "name", vc.Name)
@@ -650,9 +652,9 @@ func NextBackoff(current time.Duration) time.Duration {
 	return next
 }
 
-// launchClaudeVassal starts a king-vassal subprocess, waits for its socket,
+// launchAIVassal starts a king-vassal subprocess, waits for its socket,
 // connects the vassal pool client, and returns the running cmd.
-func (d *Daemon) launchClaudeVassal(v config.VassalConfig) (*exec.Cmd, error) {
+func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	exe, err := resolveKingVassalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("resolve king-vassal binary: %w", err)
@@ -676,6 +678,7 @@ func (d *Daemon) launchClaudeVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	}
 	args := []string{
 		"--name", v.Name,
+		"--executor", v.TypeOrDefault(), // "claude" | "codex" | "gemini"
 		"--repo", v.RepoPath,
 		"--king-dir", kingDir,
 		"--king-sock", d.sockPath,
@@ -724,9 +727,9 @@ func (d *Daemon) launchClaudeVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// startClaudeVassal launches a vassal and starts the watch/restart goroutine.
-func (d *Daemon) startClaudeVassal(v config.VassalConfig) error {
-	cmd, err := d.launchClaudeVassal(v)
+// startAIVassal launches a vassal and starts the watch/restart goroutine.
+func (d *Daemon) startAIVassal(v config.VassalConfig) error {
+	cmd, err := d.launchAIVassal(v)
 	if err != nil {
 		return err
 	}
@@ -799,7 +802,7 @@ func (d *Daemon) watchVassal(name string, cmd *exec.Cmd, cfg config.VassalConfig
 
 		backoff = NextBackoff(backoff)
 
-		newCmd, err := d.launchClaudeVassal(cfg)
+		newCmd, err := d.launchAIVassal(cfg)
 		if err != nil {
 			d.logger.Error("failed to restart vassal", "name", name, "err", err)
 			continue
