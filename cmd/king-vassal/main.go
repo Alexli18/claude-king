@@ -22,7 +22,8 @@ func main() {
 	kingDir := flag.String("king-dir", ".king", "path to .king directory")
 	kingSocket := flag.String("king-sock", "", "path to king daemon socket (auto-discovered if omitted)")
 	timeoutMin := flag.Int("timeout", 10, "task timeout in minutes")
-	model := flag.String("model", "", "claude model to use for task execution (empty = claude default)")
+	model := flag.String("model", "", "AI model to use for task execution (empty = executor default)")
+	executorType := flag.String("executor", "claude", "AI executor type: claude|codex|gemini")
 	stdio := flag.Bool("stdio", false, "serve MCP over stdio (for Claude Code .mcp.json)")
 	flag.Parse()
 
@@ -85,7 +86,12 @@ func main() {
 		"project_type", string(pt),
 	)
 
-	srv := vassal.NewVassalServer(*name, *repoPath, *kingDir, *kingSocket, *timeoutMin, *model, logger)
+	exec, err := vassal.NewExecutor(*executorType, *model)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: invalid executor: %v\n", err)
+		os.Exit(1)
+	}
+	srv := vassal.NewVassalServer(*name, *repoPath, *kingDir, *kingSocket, *timeoutMin, exec, logger)
 
 	// Register with King daemon (best-effort, non-fatal, async to avoid deadlock during daemon startup).
 	if *kingSocket != "" {
