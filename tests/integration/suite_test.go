@@ -90,6 +90,19 @@ func (td *testDaemon) callExpectError(t *testing.T, method string, params interf
 	}
 }
 
+// newPollClient creates a second independent Client connection to the same daemon.
+// Use this when the main client is blocked (e.g., waiting for approval) so
+// you can still make other RPC calls concurrently.
+func newPollClient(t *testing.T, sockPath string) *daemon.Client {
+	t.Helper()
+	c, err := daemon.NewClientFromSocket(sockPath)
+	if err != nil {
+		t.Fatalf("newPollClient: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && func() bool {
 		for i := 0; i <= len(s)-len(sub); i++ {
