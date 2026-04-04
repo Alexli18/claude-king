@@ -24,18 +24,19 @@ type testDaemon struct {
 func startDaemon(t *testing.T, kingdomYML string) *testDaemon {
 	t.Helper()
 
-	rootDir, err := os.MkdirTemp("", "king-integration-*")
+	// Use /tmp explicitly to stay within macOS 104-char Unix socket path limit.
+	rootDir, err := os.MkdirTemp("/tmp", "king-integration-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(rootDir) })
 
-	// Write kingdom.yml
+	// Write .king/kingdom.yml (LoadOrCreateConfig reads from .king/, not root).
 	kingDir := filepath.Join(rootDir, ".king")
 	if err := os.MkdirAll(kingDir, 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(rootDir, "kingdom.yml"), []byte(kingdomYML), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(kingDir, "kingdom.yml"), []byte(kingdomYML), 0644); err != nil {
 		t.Fatalf("WriteFile kingdom.yml: %v", err)
 	}
 
