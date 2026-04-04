@@ -90,15 +90,26 @@ func main() {
 	// Register with King daemon (best-effort, non-fatal, async to avoid deadlock during daemon startup).
 	if *kingSocket != "" {
 		go func() {
-			if client, err := daemon.NewClientFromSocket(*kingSocket); err == nil {
-				_, _ = client.Call("vassal.register", map[string]interface{}{
-					"name":      *name,
-					"repo_path": *repoPath,
-					"socket":    filepath.Join(*kingDir, "vassals", *name+".sock"),
-					"pid":       os.Getpid(),
-				})
-				client.Close()
+			client, err := daemon.NewClientFromSocket(*kingSocket)
+			if err != nil {
+				logger.Warn("vassal registration failed: cannot connect to king daemon",
+					"error", err,
+					"socket", *kingSocket,
+				)
+				return
 			}
+			if _, err := client.Call("vassal.register", map[string]interface{}{
+				"name":      *name,
+				"repo_path": *repoPath,
+				"socket":    filepath.Join(*kingDir, "vassals", *name+".sock"),
+				"pid":       os.Getpid(),
+			}); err != nil {
+				logger.Warn("vassal registration RPC call failed",
+					"error", err,
+					"vassal", *name,
+				)
+			}
+			client.Close()
 		}()
 	}
 
