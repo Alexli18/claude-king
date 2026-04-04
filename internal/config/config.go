@@ -266,6 +266,15 @@ func Validate(cfg *KingdomConfig) error {
 		}
 	}
 
+	for i, wh := range cfg.Settings.Webhooks {
+		if wh.URL == "" {
+			return fmt.Errorf("webhook[%d]: url must not be empty", i)
+		}
+		if !strings.HasPrefix(wh.URL, "http://") && !strings.HasPrefix(wh.URL, "https://") {
+			return fmt.Errorf("webhook[%d]: url must start with http:// or https://", i)
+		}
+	}
+
 	return nil
 }
 

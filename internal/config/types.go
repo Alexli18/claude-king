@@ -113,6 +113,18 @@ type Settings struct {
 	DefaultModel        string   `yaml:"default_model,omitempty"` // default model for all claude vassals
 	SecurityScanner     string   `yaml:"security_scanner,omitempty"`
 	SecurityScannerArgs []string `yaml:"security_scanner_args,omitempty"`
+
+	Webhooks []WebhookConfig `yaml:"webhooks,omitempty"`
+}
+
+// WebhookConfig defines a single outgoing HTTP webhook.
+type WebhookConfig struct {
+	URL        string            `yaml:"url"`                   // required; must start with https:// or http://
+	Secret     string            `yaml:"secret,omitempty"`      // HMAC-SHA256 signing key (optional)
+	On         []string          `yaml:"on,omitempty"`          // severities or event types; empty = all
+	TimeoutSec int               `yaml:"timeout_sec,omitempty"` // default 10
+	MaxRetries int               `yaml:"max_retries,omitempty"` // default 3
+	Headers    map[string]string `yaml:"headers,omitempty"`     // extra request headers
 }
 
 // DefaultSettings returns settings with sensible defaults.

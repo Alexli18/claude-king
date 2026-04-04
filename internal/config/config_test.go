@@ -236,3 +236,63 @@ func TestLoadOrCreateConfig_WritesEmptyVassals(t *testing.T) {
 		t.Errorf("expected '# Example' comment in file, got:\n%s", content)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Webhook config validation tests
+// ---------------------------------------------------------------------------
+
+func TestValidate_Webhook_ValidURL(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Settings: config.Settings{
+			Webhooks: []config.WebhookConfig{
+				{URL: "https://hooks.example.com/abc", On: []string{"error"}},
+			},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_Webhook_EmptyURL_Fails(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Settings: config.Settings{
+			Webhooks: []config.WebhookConfig{
+				{URL: "", On: []string{"error"}},
+			},
+		},
+	}
+	if err := config.Validate(cfg); err == nil {
+		t.Fatal("expected error for empty webhook URL")
+	}
+}
+
+func TestValidate_Webhook_InvalidURL_Fails(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Settings: config.Settings{
+			Webhooks: []config.WebhookConfig{
+				{URL: "not-a-url", On: []string{"error"}},
+			},
+		},
+	}
+	if err := config.Validate(cfg); err == nil {
+		t.Fatal("expected error for non-http URL")
+	}
+}
+
+func TestValidate_Webhook_EmptyOn_DefaultsAll(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "test",
+		Settings: config.Settings{
+			Webhooks: []config.WebhookConfig{
+				{URL: "https://example.com/hook"},
+			},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
