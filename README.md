@@ -10,48 +10,7 @@ When you run Claude Code in multiple repos simultaneously, each instance is isol
 [![CI](https://github.com/alexli18/claude-king/actions/workflows/ci.yml/badge.svg)](https://github.com/alexli18/claude-king/actions)
 [![Release](https://img.shields.io/github/v/release/alexli18/claude-king)](https://github.com/alexli18/claude-king/releases)
 
-![Demo](demo.gif)
-
----
-
-## The problem
-
-You run Claude Code in 3 repos at once. One agent breaks tests. Another writes an AWS key into a config file. A third hangs on a frozen PTY. You're the one watching for it — switching terminals, grepping logs, copying context between windows.
-
-King watches your agents so you don't have to.
-
----
-
-## What it does
-
-- **One view across all repos.** King's TUI and MCP tools give Claude a live feed of every vassal: status, events, errors, artifacts.
-- **Multi-AI routing.** Vassals can run Claude Code, OpenAI Codex, or Google Gemini. Mix AI tools in one kingdom. `list_vassals` exposes `type` and `specialization` so the sovereign can route tasks to the right agent.
-- **Secret scanning on every artifact.** AWS keys, GitHub tokens, private keys, `.env` files — blocked before they reach the Ledger.
-- **Auto-integrity contracts.** King fingerprints your repo (Go, Node, embedded) and installs matching health checks automatically.
-- **Health guards with circuit breaker.** Port checks, log pattern matching, data rate monitoring, custom health scripts — open the circuit and block AI modifications when things go wrong.
-- **Delegation control.** An AI session can take explicit control of a vassal (`delegate_control`) and release it. King enforces who controls what.
-- **Structured audit trail.** Every command, artifact, and event is stored in SQLite. Replay what happened and when.
-
----
-
-## Why not native Claude Code hooks + MCP?
-
-Claude Code already has hooks and MCP support. Here's where they stop and where King starts:
-
-| Capability | Claude Code hooks + MCP | King |
-|---|---|---|
-| Automate one session | ✅ | ✅ |
-| Coordinate multiple sessions across repos | ❌ | ✅ |
-| Shared event bus across all agents | ❌ | ✅ |
-| Secret scanning on AI-generated artifacts | ❌ | ✅ |
-| Persistent audit trail (SQLite) | ❌ | ✅ |
-| Cross-repo artifact addressing (`king://artifacts/...`) | ❌ | ✅ |
-| Agent health guards with circuit breaker | ❌ | ✅ |
-| Delegation control + heartbeat warden | ❌ | ✅ |
-| Works with serial/embedded devices (ESP32, NMEA) | ❌ | ✅ |
-| Multi-AI vassals (Claude, Codex, Gemini) under one control plane | ❌ | ✅ |
-
-**Hooks** automate a single Claude session's lifecycle. **King** coordinates multiple sessions and repos under one daemon, with a shared event store, artifact ledger, and enforcement layer.
+![Claude King TUI — live dashboard for all your AI agents](demo.gif)
 
 ---
 
@@ -72,13 +31,9 @@ make build && make install-user
 </details>
 
 ```bash
-# Start your Kingdom
 cd ~/your-project
-king up --detach   # runs as background daemon, logs to .king/daemon.log
-
-# Check status
-king status
-king list          # all kingdoms running on this machine
+king up --detach   # background daemon, logs to .king/daemon.log
+king status        # check kingdom health
 ```
 
 Add King as an MCP server so Claude can see your agents:
@@ -94,7 +49,51 @@ Add King as an MCP server so Claude can see your agents:
 }
 ```
 
-Restart Claude Code. It now has live access to all your running agents via `list_vassals`, `get_events`, `exec_in`, `guard_status`, and more.
+Restart Claude Code. It now has live access to all your running agents.
+
+---
+
+## Before / After
+
+**Without King:**
+You run 3 Claude Code sessions. One breaks tests — you notice 10 minutes later. Another writes an AWS key to a config file — you catch it only on commit. A third hangs — you have no idea.
+
+**With King:**
+1. `king up --detach` — once.
+2. `list_vassals` → live status of every session. `get_events` → all errors, across all repos, in one call.
+3. An agent becomes unhealthy? Circuit breaker blocks it automatically.
+
+---
+
+## What it does
+
+- **One view across all repos.** TUI and MCP tools give Claude a live feed of every vassal: status, events, errors, artifacts.
+- **Multi-AI routing.** Vassals can run Claude Code, OpenAI Codex, or Google Gemini. `list_vassals` exposes `type` and `specialization` so the sovereign can route tasks to the right agent.
+- **Secret scanning.** AWS keys, GitHub tokens, private keys, `.env` files — blocked before they reach the Ledger.
+- **Auto-integrity contracts.** King fingerprints your repo (Go, Node, embedded) and installs matching health checks automatically.
+- **Health guards with circuit breaker.** Port checks, log pattern matching, data rate monitoring, custom health scripts — open the circuit and block AI modifications when things go wrong.
+- **Delegation control.** An AI session can take exclusive control of a vassal (`delegate_control`) and release it.
+- **Structured audit trail.** Every command, artifact, and event is stored in SQLite. Replay what happened and when.
+- **Event webhooks.** HTTP POST with HMAC-SHA256 signing, retry, and event filtering — bridge to Slack, CI, or any HTTP endpoint.
+
+---
+
+## Why not native Claude Code hooks + MCP?
+
+| Capability | Claude Code hooks + MCP | King |
+|---|---|---|
+| Automate one session | Yes | Yes |
+| Coordinate multiple sessions across repos | — | Yes |
+| Shared event bus across all agents | — | Yes |
+| Secret scanning on AI-generated artifacts | — | Yes |
+| Persistent audit trail (SQLite) | — | Yes |
+| Cross-repo artifact addressing (`king://artifacts/...`) | — | Yes |
+| Agent health guards with circuit breaker | — | Yes |
+| Delegation control + heartbeat warden | — | Yes |
+| Serial/embedded devices (ESP32, NMEA) | — | Yes |
+| Multi-AI vassals (Claude, Codex, Gemini) | — | Yes |
+
+**Hooks** automate a single Claude session's lifecycle. **King** coordinates multiple sessions and repos under one daemon, with a shared event store, artifact ledger, and enforcement layer.
 
 ---
 
@@ -117,15 +116,11 @@ $ king up --detach
 
 # Claude tries to take control of api vassal — blocked:
 → delegate_control("api")
-← Error: Guard 'port_check' (index 0) circuit open for vassal 'api'.
+← Error: Guard 'port_check' circuit open for vassal 'api'.
          Consecutive failures: 3. AI modifications blocked.
 
 # After the port recovers, circuit closes automatically:
 ← WARN GUARD_CIRCUIT_CLOSED vassal=api guard_type=port_check
-
-# Claude reads serial output from embedded device:
-→ get_serial_events("firmware", "10m", "critical")
-← [{"summary": "ESP32 panic: core 0 — likely stack overflow in WiFi task"}]
 ```
 
 ---
@@ -144,11 +139,11 @@ vassals:
     env:
       PORT: "8080"
     guards:
-      - type: port_check    # is the server actually up?
+      - type: port_check
         port: 8080
         interval: 10
         threshold: 3
-      - type: log_watch     # crash pattern detection
+      - type: log_watch
         fail_on: ["FATAL", "panic:"]
         interval: 5
 
@@ -165,19 +160,19 @@ vassals:
 
   # AI vassals — King launches king-vassal subprocess for each
   - name: coder
-    type: claude                       # default; uses Claude Code CLI
+    type: claude
     repo_path: ./services/api
-    model: claude-opus-4-6             # optional; overrides default_model
-    specialization: "Go, REST APIs"    # routing hint shown in list_vassals
+    model: claude-opus-4-6
+    specialization: "Go, REST APIs"
 
   - name: frontend
-    type: codex                        # OpenAI Codex CLI
+    type: codex
     repo_path: ./services/web
     model: o4-mini
     specialization: "TypeScript, React"
 
   - name: analyst
-    type: gemini                       # Google Gemini CLI
+    type: gemini
     repo_path: ./services/data
     model: gemini-2.0-flash
     specialization: "data analysis, SQL"
@@ -192,26 +187,16 @@ settings:
   webhooks:
     - url: https://hooks.slack.com/services/...
       on: [error, critical, guard_circuit_open]
-      # secret: mysecret   # enables HMAC-SHA256 X-King-Signature header
-    - url: https://ci.example.com/king
-      on: [guard_circuit_open, guard_circuit_closed]
-      headers:
-        Authorization: "Bearer mytoken"
+      secret: mysecret  # enables HMAC-SHA256 X-King-Signature header
 ```
 
-Run `king up` — King starts `api` and `firmware` automatically, monitors both, and Claude gets live events.
-
-Test webhook delivery:
-```bash
-king webhook test https://hooks.example.com/abc
-king webhook test https://hooks.example.com/abc --secret mysecret
-```
+See [`docs/getting-started.md`](docs/getting-started.md) for the full configuration reference.
 
 ---
 
 ## Guard types
 
-Declare health checks per vassal. King runs them on a ticker and opens the circuit after N consecutive failures — blocking AI modifications until the vassal recovers.
+Health checks per vassal. King runs them on a ticker and opens the circuit after N consecutive failures — blocking AI modifications until the vassal recovers.
 
 | Type | What it checks |
 |---|---|
@@ -227,89 +212,9 @@ guards:
     timeout: 10
     threshold: 2
   - type: data_rate
-    min: 100bps     # sensor must emit at least 100 bytes/sec
+    min: 100bps
     interval: 10
 ```
-
-When the circuit opens, `delegate_control` is rejected with a clear error. When the vassal recovers, the circuit closes automatically.
-
----
-
-## Security and Hardening
-
-Claude King is designed to reduce a specific set of risks that emerge when AI coding agents operate autonomously across multiple repositories:
-
-- **Secret leakage via artifacts:** every file submitted to the Ledger is scanned for AWS credentials, GitHub tokens, private keys, and sensitive filenames before storage (`internal/security/scanner.go`).
-- **Uncontrolled command execution:** `exec_in` supports a sovereign approval gate (`internal/daemon/daemon.go`) that blocks execution until a Sovereign explicitly authorizes the command.
-- **Unhealthy agent escalation:** the guard circuit breaker (`internal/daemon/delegation_handlers.go`) blocks `delegate_control` when a vassal's health checks are failing.
-- **Auditability:** all commands, artifacts, and events are stored in SQLite at `.king/king.db`, providing a replay-capable audit trail.
-
-**What King does not currently guarantee:**
-- Sandboxed or containerized command execution
-- Network isolation between vassal processes
-- Secret scanning of event payloads or task descriptions (exec_in output IS scanned by default)
-- OS-level privilege separation between the daemon and vassals
-
-For a full threat model and planned hardening roadmap, see [`security-research/`](security-research/) and [`docs/secure-bash-roadmap.md`](docs/secure-bash-roadmap.md).
-
----
-
-## Security Quickstart
-
-**What is enabled by default:**
-- `exec_in` output is scanned for secrets (AWS keys, GitHub tokens, private keys). If a secret is detected, the command output is blocked and the agent receives `SENSITIVE_OUTPUT_BLOCKED`.
-- A warning is logged at daemon startup if `sovereign_approval` is not configured.
-
-**What you should enable before running agents you don't fully trust:**
-
-```yaml
-# kingdom.yml
-settings:
-  sovereign_approval: true        # require human approval for every exec_in command
-  sovereign_approval_timeout: 300 # seconds before auto-reject (default: 300)
-  scan_exec_output: true          # scan exec_in output for secrets (default: true, shown for clarity)
-```
-
-**What is not covered:** event payloads, task descriptions, and `dispatch_task` arguments are not scanned. No network isolation or OS-level sandboxing.
-
-See [`security-research/`](security-research/) for the full threat model.
-
----
-
-## Threat Model (Initial)
-
-| Threat | Current mitigation | Gap |
-|--------|-------------------|-----|
-| **Command injection via exec_in** | Optional sovereign approval gate (`internal/daemon/daemon.go`) | Not enforced by default; no command denylist |
-| **Secret leakage via artifacts** | Regex scanner on Ledger writes + exec_in output (`internal/security/scanner.go`) | Event payloads, task descriptions not scanned |
-| **Unsafe artifact storage** | Secret scanner blocks before SQLite write | No encryption at rest; SQLite is world-readable |
-| **Weak approval coverage** | exec_in gated when sovereign_approval configured | dispatch_task, register_artifact have no approval gate |
-| **Local trust-boundary assumptions** | Daemon runs with user's OS privileges | No isolation between King daemon and vassal processes |
-
-See [`security-research/`](security-research/) for detailed analysis of each threat.
-
----
-
-## Security
-
-Every artifact submitted to King's Ledger is scanned before storage:
-
-| Threat | Detection |
-|---|---|
-| AWS credentials (`AKIA...`) | `AWS_KEY_DETECTED` |
-| GitHub tokens (`ghp_...`) | `GITHUB_TOKEN_DETECTED` |
-| Private keys (`-----BEGIN RSA PRIVATE KEY-----`) | `PRIVATE_KEY_DETECTED` |
-| Sensitive files (`.env`, `id_rsa`, `*.pem`) | `FILENAME_BLACKLISTED` |
-
-When a vassal registers, King fingerprints its repo and installs matching integrity contracts automatically:
-
-| Project type | Auto-contracts |
-|---|---|
-| Go | `go-vet-error` |
-| Node.js + test script | `npm-test-failure` |
-| Node.js + ESLint | `eslint-error` |
-
-No config required.
 
 ---
 
@@ -327,6 +232,44 @@ No config required.
 | `delegate_control(vassal)` | Take exclusive control of a vassal |
 | `delegate_release(vassal)` | Hand control back to King |
 | `get_audit_log(limit, since)` | Full audit trail |
+| `dispatch_task(vassal, task)` | Dispatch a task to an AI vassal |
+
+---
+
+## Security
+
+Claude King reduces risks that emerge when AI agents operate autonomously across multiple repositories.
+
+**Enabled by default:**
+- Artifact scanning — AWS keys, GitHub tokens, private keys, `.env` files are blocked before storage
+- `exec_in` output scanning — secrets in command output are replaced with `SENSITIVE_OUTPUT_BLOCKED`
+- Auto-integrity contracts — King fingerprints your repo (Go, Node) and installs matching health checks
+- Guard circuit breaker — blocks `delegate_control` when health checks fail
+
+**Enable for untrusted agents:**
+
+```yaml
+settings:
+  sovereign_approval: true        # require human approval for every exec_in
+  sovereign_approval_timeout: 300 # seconds before auto-reject
+```
+
+**Not currently covered:** event payloads and task descriptions are not scanned. No network isolation or OS-level sandboxing between daemon and vassals.
+
+<details>
+<summary>Threat model</summary>
+
+| Threat | Current mitigation | Gap |
+|--------|-------------------|-----|
+| Command injection via exec_in | Optional sovereign approval gate | Not enforced by default; no command denylist |
+| Secret leakage via artifacts | Regex scanner on Ledger writes + exec_in output | Event payloads, task descriptions not scanned |
+| Unsafe artifact storage | Secret scanner blocks before SQLite write | No encryption at rest; SQLite is world-readable |
+| Weak approval coverage | exec_in gated when configured | dispatch_task, register_artifact have no approval gate |
+| Local trust-boundary | Daemon runs with user's OS privileges | No isolation between daemon and vassal processes |
+
+See [`security-research/`](security-research/) for detailed analysis and [`docs/secure-bash-roadmap.md`](docs/secure-bash-roadmap.md) for the hardening roadmap.
+
+</details>
 
 ---
 
@@ -357,10 +300,9 @@ No config required.
       (api/)    (firmware/)   (tests/)
 ```
 
-**Key facts:**
 - Each project root gets its own daemon. `king list` shows all running kingdoms.
 - Socket path: `.king/king-<sha256[:8]>.sock` — deterministic, collision-free.
-- All state is in `.king/king.db` (SQLite). Guard state is in-memory only and resets on restart.
+- All state is in `.king/king.db` (SQLite). Guard state is in-memory only.
 - Daemon sends SIGTERM to all vassals on `king down`.
 
 ---
@@ -369,9 +311,9 @@ No config required.
 
 | Platform | Status |
 |---|---|
-| macOS (arm64, amd64) | ✅ Supported |
-| Linux (amd64, arm64) | ✅ Supported |
-| Windows | ❌ Not supported (PTY dependency) |
+| macOS (arm64, amd64) | Supported |
+| Linux (amd64, arm64) | Supported |
+| Windows | Not supported (PTY dependency) |
 
 ---
 
@@ -386,9 +328,10 @@ No config required.
 - [x] Delegation control + heartbeat warden
 - [x] Health guards with circuit breaker (`guard_status`)
 - [x] Prebuilt binaries via GitHub Releases
-- [x] Multi-AI vassals — Claude Code, OpenAI Codex, Google Gemini under one control plane
+- [x] Multi-AI vassals — Claude Code, OpenAI Codex, Google Gemini
 - [x] Event webhooks (HTTP POST with HMAC signing, retry, filtering)
 - [ ] `king doctor` — full diagnostic output
+- [ ] Slack integration — bridge from solo dev to team workflows
 
 ---
 
