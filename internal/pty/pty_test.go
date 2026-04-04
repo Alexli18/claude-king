@@ -387,6 +387,9 @@ func TestSession_GetOutput_AfterCommand(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	if err := s.Start(); err != nil {
+		if strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("PTY not available in this environment: %v", err)
+		}
 		t.Fatalf("Start: %v", err)
 	}
 	defer s.Stop()
