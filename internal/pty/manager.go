@@ -83,8 +83,19 @@ func (m *Manager) CreateSession(id, name, command, cwd string, env map[string]st
 	}
 
 	// Update the store with PID and running status.
-	_ = m.store.UpdateVassalPID(id, session.PID)
-	_ = m.store.UpdateVassalStatus(id, StatusRunning)
+	if err := m.store.UpdateVassalPID(id, session.PID); err != nil {
+		m.logger.Warn("failed to update vassal PID in store",
+			slog.String("name", name),
+			slog.Int("pid", session.PID),
+			slog.String("error", err.Error()),
+		)
+	}
+	if err := m.store.UpdateVassalStatus(id, StatusRunning); err != nil {
+		m.logger.Warn("failed to update vassal status to running in store",
+			slog.String("name", name),
+			slog.String("error", err.Error()),
+		)
+	}
 
 	m.sessions[name] = session
 	m.order = append(m.order, name)
@@ -128,7 +139,12 @@ func (m *Manager) monitorSession(s *Session) {
 			slog.String("error", err.Error()),
 		)
 	}
-	_ = m.store.UpdateVassalPID(s.ID, 0)
+	if err := m.store.UpdateVassalPID(s.ID, 0); err != nil {
+		m.logger.Warn("failed to clear vassal PID in store",
+			slog.String("name", s.Name),
+			slog.String("error", err.Error()),
+		)
+	}
 
 	if exitCode != 0 {
 		m.logger.Warn("VASSAL_FAILED",
