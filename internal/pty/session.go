@@ -551,10 +551,14 @@ func (s *Session) executeCommand(command string, timeout time.Duration) CommandR
 			// Strip ANSI escape codes for clean analysis.
 			clean := stripANSI(line)
 
-			// Check if this line contains our end marker.
-			if idx := strings.Index(clean, endPattern); idx >= 0 {
+			// Check if this line is our end marker.
+			// Use HasPrefix on the trimmed line so we don't accidentally match
+			// the printf echo-back (e.g. "printf '\n__KING_id_%d__\n' $?")
+			// which contains the marker mid-line but is NOT the actual output.
+			cleanTrimmed := strings.TrimSpace(clean)
+			if strings.HasPrefix(cleanTrimmed, endPattern) {
 				// Parse exit code: __KING_<id>_<exitcode>__
-				markerPart := clean[idx+len(endPattern):]
+				markerPart := cleanTrimmed[len(endPattern):]
 				markerPart = strings.TrimSuffix(markerPart, "__")
 				markerPart = strings.TrimSpace(markerPart)
 				if code, err := strconv.Atoi(markerPart); err == nil {
