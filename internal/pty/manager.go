@@ -82,8 +82,9 @@ func (m *Manager) CreateSession(id, name, command, cwd string, env map[string]st
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
-	// Snapshot PID before background goroutines can zero it on fast exit.
-	pid := session.PID
+	// Use GetPID() to avoid a data race with waitLoop which zeroes PID under
+	// the session mutex when the process exits.
+	pid := session.GetPID()
 
 	// Update the store with PID and running status.
 	if err := m.store.UpdateVassalPID(id, pid); err != nil {

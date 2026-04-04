@@ -347,6 +347,14 @@ func (s *Session) waitLoop() {
 	s.PID = 0
 }
 
+// GetPID returns the process ID of the session under the read lock.
+// Use this instead of accessing PID directly to avoid data races with waitLoop.
+func (s *Session) GetPID() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.PID
+}
+
 // Stop terminates the session gracefully (SIGTERM, then SIGKILL after 5s).
 func (s *Session) Stop() error {
 	s.mu.RLock()
