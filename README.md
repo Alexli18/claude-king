@@ -25,6 +25,7 @@ King watches your agents so you don't have to.
 ## What it does
 
 - **One view across all repos.** King's TUI and MCP tools give Claude a live feed of every vassal: status, events, errors, artifacts.
+- **Multi-AI routing.** Vassals can run Claude Code, OpenAI Codex, or Google Gemini. Mix AI tools in one kingdom. `list_vassals` exposes `type` and `specialization` so the sovereign can route tasks to the right agent.
 - **Secret scanning on every artifact.** AWS keys, GitHub tokens, private keys, `.env` files — blocked before they reach the Ledger.
 - **Auto-integrity contracts.** King fingerprints your repo (Go, Node, embedded) and installs matching health checks automatically.
 - **Health guards with circuit breaker.** Port checks, log pattern matching, data rate monitoring, custom health scripts — open the circuit and block AI modifications when things go wrong.
@@ -48,6 +49,7 @@ Claude Code already has hooks and MCP support. Here's where they stop and where 
 | Agent health guards with circuit breaker | ❌ | ✅ |
 | Delegation control + heartbeat warden | ❌ | ✅ |
 | Works with serial/embedded devices (ESP32, NMEA) | ❌ | ✅ |
+| Multi-AI vassals (Claude, Codex, Gemini) under one control plane | ❌ | ✅ |
 
 **Hooks** automate a single Claude session's lifecycle. **King** coordinates multiple sessions and repos under one daemon, with a shared event store, artifact ledger, and enforcement layer.
 
@@ -160,6 +162,25 @@ vassals:
   - name: tests
     command: go test ./... -v
     autostart: false
+
+  # AI vassals — King launches king-vassal subprocess for each
+  - name: coder
+    type: claude                       # default; uses Claude Code CLI
+    repo_path: ./services/api
+    model: claude-opus-4-6             # optional; overrides default_model
+    specialization: "Go, REST APIs"    # routing hint shown in list_vassals
+
+  - name: frontend
+    type: codex                        # OpenAI Codex CLI
+    repo_path: ./services/web
+    model: o4-mini
+    specialization: "TypeScript, React"
+
+  - name: analyst
+    type: gemini                       # Google Gemini CLI
+    repo_path: ./services/data
+    model: gemini-2.0-flash
+    specialization: "data analysis, SQL"
 
 patterns:
   - name: build-fail
@@ -280,7 +301,7 @@ No config required.
 
 | Tool | What Claude can do |
 |---|---|
-| `list_vassals()` | Status of every running agent |
+| `list_vassals()` | Status, type (`claude`/`codex`/`gemini`/`shell`), and `specialization` of every agent |
 | `exec_in(vassal, cmd)` | Run a command in a background terminal |
 | `get_events(severity)` | Fetch errors and warnings across all repos |
 | `get_serial_events(vassal, since, severity)` | Events from serial/embedded vassals |
@@ -349,6 +370,7 @@ No config required.
 - [x] Delegation control + heartbeat warden
 - [x] Health guards with circuit breaker (`guard_status`)
 - [x] Prebuilt binaries via GitHub Releases
+- [x] Multi-AI vassals — Claude Code, OpenAI Codex, Google Gemini under one control plane
 - [ ] Event webhooks
 - [ ] `king doctor` — full diagnostic output
 

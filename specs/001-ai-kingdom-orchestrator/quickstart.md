@@ -2,9 +2,10 @@
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.25+
 - macOS or Linux
 - Claude Code (or any MCP-aware AI agent)
+- Optional: `codex` CLI (OpenAI) and/or `gemini` CLI (Google) if using those vassal types
 
 ## Build
 
@@ -80,6 +81,32 @@ Once the King daemon is running, Scepter Tools are available in Claude Code:
 > What errors have happened recently?
 # Claude calls get_events(severity: "error")
 ```
+
+## AI Vassals (Claude, Codex, Gemini)
+
+King can manage AI CLI tools as vassals alongside shell processes. Declare them in `.king/kingdom.yml`:
+
+```yaml
+vassals:
+  - name: coder
+    type: claude                        # Claude Code (default)
+    repo_path: ./services/api
+    specialization: "Go, REST APIs"     # shown in list_vassals for routing
+
+  - name: frontend
+    type: codex                         # OpenAI Codex CLI
+    repo_path: ./services/web
+    model: o4-mini
+    specialization: "TypeScript, React"
+
+  - name: analyst
+    type: gemini                        # Google Gemini CLI
+    repo_path: ./services/data
+    model: gemini-2.0-flash
+    specialization: "data analysis, SQL"
+```
+
+King launches a `king-vassal` subprocess for each AI vassal. When the sovereign calls `list_vassals()`, it gets `type` and `specialization` per vassal — enough to route `dispatch_task` to the right AI.
 
 ## CLI Quick Reference
 

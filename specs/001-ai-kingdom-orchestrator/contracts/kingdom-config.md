@@ -10,13 +10,18 @@ name: string                    # Kingdom display name (default: directory name)
 
 vassals:
   - name: string                # Unique vassal identifier (required)
-    command: string             # Shell command to run (required)
+    type: string                # "shell" (default) | "claude" | "codex" | "gemini" | "serial"
+    command: string             # Shell command (required for shell; omit for claude/codex/gemini/serial)
     cwd: string                 # Working directory, relative to kingdom root (default: ".")
     repo_path: string           # Path to vassal's repository (for VMP discovery)
     env:                        # Additional environment variables
       KEY: VALUE
     autostart: bool             # Start on `king up` (default: true)
     restart_policy: string      # never | on-failure | always (default: never)
+
+    # AI vassal fields (type: claude | codex | gemini)
+    model: string               # Model override, e.g. "claude-opus-4-6", "o4-mini", "gemini-2.0-flash"
+    specialization: string      # Routing hint for the sovereign, e.g. "TypeScript, React"
 
 patterns:                       # Semantic Sieve event detection rules
   - name: string                # Pattern identifier (required)
@@ -65,6 +70,25 @@ vassals:
   - name: log-watcher
     command: tail -f /var/log/syslog
     autostart: false
+
+  # AI vassals — King launches king-vassal subprocess for each
+  - name: coder
+    type: claude
+    repo_path: ../api
+    model: claude-opus-4-6
+    specialization: "Go, REST APIs"
+
+  - name: ui-agent
+    type: codex
+    repo_path: ../web
+    model: o4-mini
+    specialization: "TypeScript, React"
+
+  - name: analyst
+    type: gemini
+    repo_path: ../data
+    model: gemini-2.0-flash
+    specialization: "data analysis, SQL"
 
 patterns:
   - name: esp32-error
