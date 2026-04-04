@@ -98,10 +98,16 @@ func (vc *VassalClient) CallTool(ctx context.Context, toolName string, args map[
 
 	// Forward context deadline to the connection so ReadBytes doesn't block
 	// indefinitely if the context is cancelled or times out.
+	// If context has no explicit deadline, use a 60s default to prevent
+	// indefinite hangs when a vassal process is stuck.
+	const defaultVassalTimeout = 60 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = vc.conn.SetReadDeadline(deadline)
-		defer vc.conn.SetReadDeadline(time.Time{}) //nolint:errcheck
+	} else {
+		_ = vc.conn.SetReadDeadline(time.Now().Add(defaultVassalTimeout))
 	}
+	defer vc.conn.SetReadDeadline(time.Time{}) //nolint:errcheck
+
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("vassal_client context: %w", err)
 	}
