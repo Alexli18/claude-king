@@ -157,6 +157,10 @@ type Daemon struct {
 	guardStates       map[string]*GuardState
 	guardStatesMu     sync.RWMutex
 	webhookDispatcher *webhook.Dispatcher
+
+	// attachMode is true when Attach() was called instead of Start().
+	// In this mode Stop() must NOT remove the daemon's socket/PID files.
+	attachMode bool
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -454,6 +458,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 // Attach initializes daemon state for MCP-only mode (no daemon socket, no vassal launching).
 // Use this when a daemon is already running and we just need to serve MCP over stdio.
 func (d *Daemon) Attach(ctx context.Context) error {
+	d.attachMode = true
 	d.ctx, d.cancel = context.WithCancel(ctx)
 
 	if err := config.EnsureKingDir(d.rootDir); err != nil {
@@ -1083,9 +1088,14 @@ func (d *Daemon) Stop() error {
 	// Wait for connection handlers to finish.
 	d.wg.Wait()
 
-	// Step 5: Remove socket and PID files.
-	os.Remove(d.sockPath)
-	d.removePIDFile()
+	// Step 5: Remove socket and PID files — only in Start mode.
+	// In Attach mode these files belong to the daemon process; removing
+	// them would make the next king mcp think no daemon is running and
+	// launch duplicate vassal processes (process leak).
+	if !d.attachMode {
+		os.Remove(d.sockPath)
+		d.removePIDFile()
+	}
 
 	// Step 6: Set kingdom status to "stopped" before closing store.
 	if d.kingdom != nil {
