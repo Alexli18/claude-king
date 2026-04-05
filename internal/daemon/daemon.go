@@ -161,6 +161,11 @@ type Daemon struct {
 	// attachMode is true when Attach() was called instead of Start().
 	// In this mode Stop() must NOT remove the daemon's socket/PID files.
 	attachMode bool
+
+	// activeConns tracks open RPC connections so Stop() can close them
+	// before wg.Wait(), breaking the shutdown deadlock.
+	connsMu     sync.Mutex
+	activeConns map[net.Conn]struct{}
 }
 
 // NewDaemon creates a new daemon instance for the given root directory.
@@ -188,6 +193,7 @@ func NewDaemon(rootDir string) (*Daemon, error) {
 		externalVassals:  make(map[string]ExternalVassalInfo),
 		delegatedVassals: make(map[string]DelegationInfo),
 		guardStates:      make(map[string]*GuardState),
+		activeConns:      make(map[net.Conn]struct{}),
 	}
 
 	d.vassalPool = NewVassalClientPool()
@@ -807,6 +813,20 @@ func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	}
 	d.vassalProcsMu.Unlock()
 
+	// Kill any orphaned vassal process from a previous daemon run that was
+	// never cleaned up (e.g. parent killed via SIGKILL, leaving children alive).
+	vassalPIDPath := filepath.Join(kingDir, "vassals", v.Name+".pid")
+	if data, err := os.ReadFile(vassalPIDPath); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 0 {
+			if pgid, err := syscall.Getpgid(pid); err == nil && pgid > 0 {
+				_ = syscall.Kill(-pgid, syscall.SIGTERM)
+			} else if proc, err := os.FindProcess(pid); err == nil {
+				_ = proc.Signal(syscall.SIGTERM)
+			}
+		}
+		_ = os.Remove(vassalPIDPath)
+	}
+
 	// Disconnect any stale pool entry and remove stale socket so the poll loop
 	// below waits for the fresh one (handles daemon restarts and vassal crashes).
 	_ = d.vassalPool.Disconnect(v.Name)
@@ -849,6 +869,10 @@ func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("connect to king-vassal %q: %w", v.Name, err)
 	}
+
+	// Write per-vassal PID file so the next launchAIVassal call can kill
+	// this process even if the parent daemon was killed without cleanup.
+	_ = os.WriteFile(vassalPIDPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 
 	return cmd, nil
 }
@@ -1066,6 +1090,10 @@ func (d *Daemon) Stop() error {
 		} else {
 			_ = vp.process.Signal(syscall.SIGTERM)
 		}
+		// Remove per-vassal PID file so next daemon start won't try to kill
+		// a process we already shut down gracefully.
+		kingDir := filepath.Join(d.rootDir, kingDirName)
+		_ = os.Remove(filepath.Join(kingDir, "vassals", vassalNames[i]+".pid"))
 	}
 	// Wait up to 3s for all vassals to exit, then SIGKILL survivors.
 	if len(vassalSnapshot) > 0 {
@@ -1084,6 +1112,15 @@ func (d *Daemon) Stop() error {
 	if d.listener != nil {
 		d.listener.Close()
 	}
+
+	// Close all active RPC connections to unblock handleConnection goroutines
+	// that are blocked in scanner.Scan(). Without this, wg.Wait() deadlocks
+	// when king down holds an open connection waiting for the socket to disappear.
+	d.connsMu.Lock()
+	for conn := range d.activeConns {
+		conn.Close()
+	}
+	d.connsMu.Unlock()
 
 	// Wait for connection handlers to finish.
 	d.wg.Wait()
@@ -1192,6 +1229,19 @@ func (d *Daemon) ServeConn(conn net.Conn) {
 func (d *Daemon) handleConnection(conn net.Conn) {
 	defer d.wg.Done()
 	defer conn.Close()
+
+	// Track connection so Stop() can close it and unblock scanner.Scan().
+	d.connsMu.Lock()
+	if d.activeConns == nil {
+		d.activeConns = make(map[net.Conn]struct{})
+	}
+	d.activeConns[conn] = struct{}{}
+	d.connsMu.Unlock()
+	defer func() {
+		d.connsMu.Lock()
+		delete(d.activeConns, conn)
+		d.connsMu.Unlock()
+	}()
 
 	scanner := bufio.NewScanner(conn)
 	// Allow up to 1 MB per line for large JSON-RPC payloads.
