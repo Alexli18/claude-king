@@ -38,7 +38,7 @@ King Daemon (background)
 1. `king up --detach` → starts daemon, creates socket, launches `type:claude` vassals
 2. Claude Code opens FIX/ → reads `.mcp.json`
 3. Claude Code starts `king mcp` → attaches to running daemon (or starts its own)
-4. Claude Code starts `king-vassal --stdio` for each sub-repo → each connects to daemon for registration
+4. Claude Code starts `king-vassal --stdio --name <vassal>` for each sub-repo → each resolves `repo_path` from `kingdom.yml` and connects to daemon for registration
 
 ### MCP Flow: Sovereign dispatching to Vassal
 

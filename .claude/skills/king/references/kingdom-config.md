@@ -63,13 +63,13 @@ For Claude Code in the kingdom root directory:
     },
     "firmware": {
       "command": "/path/to/king-vassal",
-      "args": ["--stdio"],
-      "cwd": "/path/to/kingdom-root/emwirs-esp32-firmware"
+      "args": ["--stdio", "--name", "firmware"],
+      "cwd": "/path/to/kingdom-root"
     },
     "ml-pipeline": {
       "command": "/path/to/king-vassal",
-      "args": ["--stdio"],
-      "cwd": "/path/to/kingdom-root/emwirs-ml-pipeline"
+      "args": ["--stdio", "--name", "ml-pipeline"],
+      "cwd": "/path/to/kingdom-root"
     }
   }
 }
@@ -77,7 +77,8 @@ For Claude Code in the kingdom root directory:
 
 **Notes:**
 - `king mcp` starts the MCP gateway; if daemon already running it attaches to it
-- `king-vassal --stdio` auto-discovers the King daemon socket from its `cwd`
+- `--name` must match the vassal name in `kingdom.yml`; king-vassal auto-resolves `repo_path` from the config
+- `cwd` should be the kingdom root (not the sub-repo); Claude Code may not honor per-vassal `cwd`
 - Daemon must be running (`king up --detach`) before opening Claude Code
 
 ## vassal.json (optional per-repo manifest)

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -194,6 +195,13 @@ func Validate(cfg *KingdomConfig) error {
 			return fmt.Errorf("duplicate vassal name: %q", v.Name)
 		}
 		vassalNames[v.Name] = struct{}{}
+
+		// Validate hang_timeout
+		if v.HangTimeout != "" && v.HangTimeout != "0" {
+			if _, err := time.ParseDuration(v.HangTimeout); err != nil {
+				return fmt.Errorf("vassal %q: invalid hang_timeout %q: %w", v.Name, v.HangTimeout, err)
+			}
+		}
 
 		// Validate guards
 		for j, gc := range v.Guards {

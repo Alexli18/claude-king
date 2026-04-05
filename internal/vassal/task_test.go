@@ -280,7 +280,7 @@ func TestWriteVassalMD_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	task := vassal.NewTask("worker", "build the app", nil)
 
-	if err := vassal.WriteVassalMD(dir, "worker", task, nil); err != nil {
+	if err := vassal.WriteVassalMD(dir, "worker", "", task, nil); err != nil {
 		t.Fatalf("WriteVassalMD: %v", err)
 	}
 
@@ -293,7 +293,7 @@ func TestWriteVassalMD_ContainsVassalNameAndTask(t *testing.T) {
 	dir := t.TempDir()
 	task := vassal.NewTask("my-vassal", "analyze data", nil)
 
-	_ = vassal.WriteVassalMD(dir, "my-vassal", task, nil)
+	_ = vassal.WriteVassalMD(dir, "my-vassal", "", task, nil)
 
 	data, err := os.ReadFile(filepath.Join(dir, "VASSAL.md"))
 	if err != nil {
@@ -313,7 +313,7 @@ func TestWriteVassalMD_WithArtifacts(t *testing.T) {
 		{Name: "data.json", FilePath: "/tmp/data.json"},
 	}
 
-	_ = vassal.WriteVassalMD(dir, "worker", task, artifacts)
+	_ = vassal.WriteVassalMD(dir, "worker", "", task, artifacts)
 
 	data, _ := os.ReadFile(filepath.Join(dir, "VASSAL.md"))
 	content := string(data)
@@ -326,7 +326,7 @@ func TestWriteVassalMD_WithNotes(t *testing.T) {
 	dir := t.TempDir()
 	task := vassal.NewTask("worker", "do work", map[string]any{"notes": "important context"})
 
-	_ = vassal.WriteVassalMD(dir, "worker", task, nil)
+	_ = vassal.WriteVassalMD(dir, "worker", "", task, nil)
 
 	data, _ := os.ReadFile(filepath.Join(dir, "VASSAL.md"))
 	if !contains(string(data), "important context") {
@@ -336,7 +336,7 @@ func TestWriteVassalMD_WithNotes(t *testing.T) {
 
 func TestWriteVassalMD_NilTask_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
-	err := vassal.WriteVassalMD(dir, "worker", nil, nil)
+	err := vassal.WriteVassalMD(dir, "worker", "", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil task, got nil")
 	}
@@ -346,7 +346,7 @@ func TestWriteVassalMD_NoArtifacts_NoArtifactsSection(t *testing.T) {
 	dir := t.TempDir()
 	task := vassal.NewTask("worker", "simple task", nil)
 
-	_ = vassal.WriteVassalMD(dir, "worker", task, nil)
+	_ = vassal.WriteVassalMD(dir, "worker", "", task, nil)
 
 	data, _ := os.ReadFile(filepath.Join(dir, "VASSAL.md"))
 	if contains(string(data), "Available artifacts") {
@@ -356,7 +356,7 @@ func TestWriteVassalMD_NoArtifacts_NoArtifactsSection(t *testing.T) {
 
 func TestWriteVassalMD_InvalidDir_ReturnsError(t *testing.T) {
 	task := vassal.NewTask("worker", "t", nil)
-	err := vassal.WriteVassalMD("/nonexistent/path/that/cannot/exist", "worker", task, nil)
+	err := vassal.WriteVassalMD("/nonexistent/path/that/cannot/exist", "worker", "", task, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid dir, got nil")
 	}

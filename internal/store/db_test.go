@@ -1015,3 +1015,150 @@ func TestApprovalRequest_ExpirePending(t *testing.T) {
 		t.Errorf("expected 0 pending after expire, got %d", len(pending))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GatewayTask
+// ---------------------------------------------------------------------------
+
+func TestGatewayTask_CreateAndGet(t *testing.T) {
+	s := newTestStore(t)
+
+	gt := store.GatewayTask{
+		TaskID:          "gt-test-001",
+		VassalName:      "alpha",
+		TaskDescription: "implement feature X",
+		TaskContext:      `{"notes":"some context"}`,
+		Status:          "queued",
+	}
+
+	if err := s.CreateGatewayTask(gt); err != nil {
+		t.Fatalf("CreateGatewayTask: %v", err)
+	}
+
+	got, err := s.GetGatewayTask("gt-test-001")
+	if err != nil {
+		t.Fatalf("GetGatewayTask: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetGatewayTask returned nil")
+	}
+	if got.VassalName != "alpha" || got.Status != "queued" || got.TaskDescription != "implement feature X" {
+		t.Errorf("unexpected: %+v", got)
+	}
+}
+
+func TestGatewayTask_GetNotFound(t *testing.T) {
+	s := newTestStore(t)
+
+	got, err := s.GetGatewayTask("gt-nonexistent")
+	if err != nil {
+		t.Fatalf("GetGatewayTask: %v", err)
+	}
+	if got != nil {
+		t.Error("expected nil for nonexistent task")
+	}
+}
+
+func TestGatewayTask_Update(t *testing.T) {
+	s := newTestStore(t)
+
+	gt := store.GatewayTask{
+		TaskID:          "gt-test-002",
+		VassalName:      "beta",
+		TaskDescription: "fix bug Y",
+		Status:          "queued",
+	}
+	_ = s.CreateGatewayTask(gt)
+
+	if err := s.UpdateGatewayTask("gt-test-002", "accepted", "t-vassal-123", "", ""); err != nil {
+		t.Fatalf("UpdateGatewayTask: %v", err)
+	}
+
+	got, _ := s.GetGatewayTask("gt-test-002")
+	if got.Status != "accepted" || got.VassalTaskID != "t-vassal-123" {
+		t.Errorf("unexpected after update: status=%s vassal_task_id=%s", got.Status, got.VassalTaskID)
+	}
+
+	if err := s.UpdateGatewayTask("gt-test-002", "done", "", "task completed successfully", ""); err != nil {
+		t.Fatalf("UpdateGatewayTask done: %v", err)
+	}
+
+	got, _ = s.GetGatewayTask("gt-test-002")
+	if got.Status != "done" || got.Result != "task completed successfully" || got.VassalTaskID != "t-vassal-123" {
+		t.Errorf("unexpected after done: %+v", got)
+	}
+}
+
+func TestGatewayTask_Update_NotFound(t *testing.T) {
+	s := newTestStore(t)
+
+	err := s.UpdateGatewayTask("gt-nonexistent", "failed", "", "", "oops")
+	if err == nil {
+		t.Error("expected error for nonexistent task")
+	}
+}
+
+func TestGatewayTask_ListActive(t *testing.T) {
+	s := newTestStore(t)
+
+	for _, status := range []string{"queued", "accepted", "running", "done", "failed"} {
+		_ = s.CreateGatewayTask(store.GatewayTask{
+			TaskID:          "gt-" + status,
+			VassalName:      "v",
+			TaskDescription: "task " + status,
+			Status:          status,
+		})
+	}
+
+	active, err := s.ListActiveGatewayTasks()
+	if err != nil {
+		t.Fatalf("ListActiveGatewayTasks: %v", err)
+	}
+
+	if len(active) != 3 {
+		t.Errorf("expected 3 active tasks, got %d", len(active))
+	}
+	for _, a := range active {
+		if a.Status == "done" || a.Status == "failed" {
+			t.Errorf("terminal task in active list: %s", a.Status)
+		}
+	}
+}
+
+func TestGatewayTask_DeleteOld(t *testing.T) {
+	s := newTestStore(t)
+
+	_ = s.CreateGatewayTask(store.GatewayTask{
+		TaskID:          "gt-old",
+		VassalName:      "v",
+		TaskDescription: "old task",
+		Status:          "done",
+	})
+
+	// Set updated_at to 30 days ago.
+	s.DB().Exec("UPDATE gateway_tasks SET updated_at = datetime('now', '-30 days') WHERE task_id = 'gt-old'")
+
+	_ = s.CreateGatewayTask(store.GatewayTask{
+		TaskID:          "gt-recent",
+		VassalName:      "v",
+		TaskDescription: "recent task",
+		Status:          "done",
+	})
+
+	if err := s.DeleteOldGatewayTasks(7); err != nil {
+		t.Fatalf("DeleteOldGatewayTasks: %v", err)
+	}
+
+	old, _ := s.GetGatewayTask("gt-old")
+	recent, _ := s.GetGatewayTask("gt-recent")
+
+	if old != nil {
+		t.Error("old task should have been deleted")
+	}
+	if recent == nil {
+		t.Error("recent task should still exist")
+	}
+}
+
+// Verify _ import used.
+var _ = time.Now

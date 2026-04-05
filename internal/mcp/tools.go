@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alexli18/claude-king/internal/artifacts"
+	"github.com/google/uuid"
 	"github.com/alexli18/claude-king/internal/audit"
 	"github.com/alexli18/claude-king/internal/security"
 	"github.com/alexli18/claude-king/internal/store"
@@ -255,7 +256,18 @@ func (s *Server) handleRegisterArtifact(_ context.Context, request mcp.CallToolR
 	producer := request.GetString("producer", "")
 	mimeType := request.GetString("mime_type", "")
 
-	a, err := s.ledger.Register(name, filePath, producer, mimeType)
+	// Resolve producer name to vassal UUID for FK constraint.
+	producerID := producer
+	if producer != "" {
+		if v, lookupErr := s.store.GetVassalByName(s.kingdomID, producer); lookupErr == nil && v != nil {
+			producerID = v.ID
+		} else {
+			// Not a known vassal — pass empty to avoid FK violation.
+			producerID = ""
+		}
+	}
+
+	a, err := s.ledger.Register(name, filePath, producerID, mimeType)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("REGISTER_FAILED: %v", err)), nil
 	}
@@ -544,8 +556,16 @@ func (s *Server) handleRespondApproval(_ context.Context, request mcp.CallToolRe
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-// handleDispatchTask proxies a dispatch_task call to the named vassal's MCP server.
-func (s *Server) handleDispatchTask(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Timeouts for proxied tool calls to vassal MCP servers.
+// dispatch_task may run an AI task that takes minutes; status/abort are fast queries.
+const (
+	dispatchTaskTimeout = 120 * time.Second
+	vassalCallTimeout   = 30 * time.Second
+)
+
+// handleDispatchTask creates a gateway task, dispatches to vassal asynchronously,
+// and returns immediately with a gateway task ID.
+func (s *Server) handleDispatchTask(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	s.logger.Debug("handling dispatch_task call")
 
 	vassalName, err := request.RequireString("vassal")
@@ -562,30 +582,49 @@ func (s *Server) handleDispatchTask(ctx context.Context, request mcp.CallToolReq
 		return mcp.NewToolResultError("vassal pool not available"), nil
 	}
 
-	client, ok := s.vassalPool.Get(vassalName)
-	if !ok {
+	if _, ok := s.vassalPool.Get(vassalName); !ok {
 		return mcp.NewToolResultError(fmt.Sprintf("vassal not found or not a claude vassal: %q", vassalName)), nil
 	}
 
-	args := map[string]any{
-		"task": task,
+	if s.taskStore == nil {
+		return mcp.NewToolResultError("task store not available"), nil
 	}
-	// Pass optional context object through if provided.
+
+	// Extract optional context JSON.
+	var contextJSON string
 	if rawArgs := request.GetArguments(); rawArgs != nil {
 		if taskCtx, exists := rawArgs["context"]; exists && taskCtx != nil {
-			args["context"] = taskCtx
+			if b, err := json.Marshal(taskCtx); err == nil {
+				contextJSON = string(b)
+			}
 		}
 	}
 
-	result, err := client.CallTool(ctx, "dispatch_task", args)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("dispatch_task failed: %v", err)), nil
+	gtID := "gt-" + uuid.New().String()
+	if err := s.taskStore.CreateGatewayTask(store.GatewayTask{
+		TaskID:          gtID,
+		VassalName:      vassalName,
+		TaskDescription: task,
+		TaskContext:      contextJSON,
+		Status:          "queued",
+	}); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to create gateway task: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(result), nil
+	// Async submission to vassal.
+	go s.submitTaskToVassal(gtID, vassalName, task, contextJSON)
+
+	result := map[string]any{
+		"task_id": gtID,
+		"vassal":  vassalName,
+		"status":  "queued",
+	}
+	data, _ := json.Marshal(result)
+	return mcp.NewToolResultText(string(data)), nil
 }
 
-// handleGetTaskStatus proxies a get_task_status call to the named vassal's MCP server.
+// handleGetTaskStatus returns task status from the gateway cache.
+// For gt-* IDs it reads from DB; for t-* IDs it falls back to legacy vassal proxy.
 func (s *Server) handleGetTaskStatus(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	s.logger.Debug("handling get_task_status call")
 
@@ -599,6 +638,31 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, request mcp.CallToolRe
 		return mcp.NewToolResultError("INVALID_PARAMS: task_id is required"), nil
 	}
 
+	// Gateway task — read from DB cache.
+	if strings.HasPrefix(taskID, "gt-") && s.taskStore != nil {
+		gt, err := s.taskStore.GetGatewayTask(taskID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get gateway task: %v", err)), nil
+		}
+		if gt == nil {
+			return mcp.NewToolResultError(fmt.Sprintf("task not found: %s", taskID)), nil
+		}
+		result := map[string]any{
+			"task_id":         gt.TaskID,
+			"vassal":          gt.VassalName,
+			"vassal_task_id":  gt.VassalTaskID,
+			"status":          gt.Status,
+			"description":     gt.TaskDescription,
+			"result":          gt.Result,
+			"error":           gt.ErrorMessage,
+			"created_at":      gt.CreatedAt,
+			"updated_at":      gt.UpdatedAt,
+		}
+		data, _ := json.Marshal(result)
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// Legacy vassal task ID (t-*) — proxy to vassal directly.
 	if s.vassalPool == nil {
 		return mcp.NewToolResultError("vassal pool not available"), nil
 	}
@@ -608,18 +672,24 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, request mcp.CallToolRe
 		return mcp.NewToolResultError(fmt.Sprintf("vassal not found or not a claude vassal: %q", vassalName)), nil
 	}
 
-	result, err := client.CallTool(ctx, "get_task_status", map[string]any{
+	callCtx, cancel := context.WithTimeout(ctx, vassalCallTimeout)
+	defer cancel()
+
+	result, err := client.CallTool(callCtx, "get_task_status", map[string]any{
 		"task_id": taskID,
 	})
 	if err != nil {
+		if callCtx.Err() == context.DeadlineExceeded {
+			return mcp.NewToolResultError(fmt.Sprintf("TIMEOUT: get_task_status on vassal %q did not respond within %s", vassalName, vassalCallTimeout)), nil
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("get_task_status failed: %v", err)), nil
 	}
 
 	return mcp.NewToolResultText(result), nil
 }
 
-// handleAbortTask proxies an abort_task call to the named vassal's MCP server.
-func (s *Server) handleAbortTask(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// handleAbortTask marks a gateway task as aborted and sends abort to vassal asynchronously.
+func (s *Server) handleAbortTask(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	s.logger.Debug("handling abort_task call")
 
 	vassalName, err := request.RequireString("vassal")
@@ -632,6 +702,42 @@ func (s *Server) handleAbortTask(ctx context.Context, request mcp.CallToolReques
 		return mcp.NewToolResultError("INVALID_PARAMS: task_id is required"), nil
 	}
 
+	// Gateway task — update DB and async-deliver abort to vassal.
+	if strings.HasPrefix(taskID, "gt-") && s.taskStore != nil {
+		gt, err := s.taskStore.GetGatewayTask(taskID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get gateway task: %v", err)), nil
+		}
+		if gt == nil {
+			return mcp.NewToolResultError(fmt.Sprintf("task not found: %s", taskID)), nil
+		}
+
+		// Only abort active tasks.
+		switch gt.Status {
+		case "done", "failed", "timeout", "aborted":
+			return mcp.NewToolResultError(fmt.Sprintf("task already in terminal state: %s", gt.Status)), nil
+		}
+
+		// Mark as aborted in DB immediately.
+		if err := s.taskStore.UpdateGatewayTask(taskID, "aborted", "", "", "aborted by user"); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to update task: %v", err)), nil
+		}
+
+		// Best-effort async abort to vassal.
+		if gt.VassalTaskID != "" {
+			go s.abortTaskOnVassal(gt.VassalName, gt.VassalTaskID)
+		}
+
+		result := map[string]any{
+			"task_id": taskID,
+			"vassal":  vassalName,
+			"status":  "aborted",
+		}
+		data, _ := json.Marshal(result)
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// Legacy vassal task ID — proxy to vassal directly.
 	if s.vassalPool == nil {
 		return mcp.NewToolResultError("vassal pool not available"), nil
 	}
@@ -641,10 +747,16 @@ func (s *Server) handleAbortTask(ctx context.Context, request mcp.CallToolReques
 		return mcp.NewToolResultError(fmt.Sprintf("vassal not found or not a claude vassal: %q", vassalName)), nil
 	}
 
-	result, err := client.CallTool(ctx, "abort_task", map[string]any{
+	callCtx, cancel := context.WithTimeout(context.Background(), vassalCallTimeout)
+	defer cancel()
+
+	result, err := client.CallTool(callCtx, "abort_task", map[string]any{
 		"task_id": taskID,
 	})
 	if err != nil {
+		if callCtx.Err() == context.DeadlineExceeded {
+			return mcp.NewToolResultError(fmt.Sprintf("TIMEOUT: abort_task on vassal %q did not respond within %s", vassalName, vassalCallTimeout)), nil
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("abort_task failed: %v", err)), nil
 	}
 

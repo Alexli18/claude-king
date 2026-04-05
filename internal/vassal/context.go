@@ -15,7 +15,7 @@ type ArtifactRef struct {
 
 // WriteVassalMD generates VASSAL.md in repoPath with task context.
 // Claude Code reads this file to understand its role and assigned task.
-func WriteVassalMD(repoPath, vassalName string, t *Task, artifacts []ArtifactRef) error {
+func WriteVassalMD(repoPath, vassalName, kingDir string, t *Task, artifacts []ArtifactRef) error {
 	if t == nil {
 		return fmt.Errorf("WriteVassalMD: task must not be nil")
 	}
@@ -44,7 +44,11 @@ func WriteVassalMD(repoPath, vassalName string, t *Task, artifacts []ArtifactRef
 	sb.WriteString("Your text response IS the task output — King reads it directly via `get_task_status`.\n")
 	sb.WriteString("Do NOT summarize with 'report sent to King' or similar. Include ALL content inline.\n\n")
 	sb.WriteString("If you produced output files (reports, builds, data), register them as artifacts:\n")
-	sb.WriteString(fmt.Sprintf("```\nkingctl report-done --task %s --artifacts file1 file2\n```\n", t.ID))
+	if kingDir != "" {
+		sb.WriteString(fmt.Sprintf("```\nkingctl report-done --king-dir %s --task %s --artifacts file1 file2\n```\n", kingDir, t.ID))
+	} else {
+		sb.WriteString(fmt.Sprintf("```\nkingctl report-done --task %s --artifacts file1 file2\n```\n", t.ID))
+	}
 	sb.WriteString("(Omit `--artifacts` if there are no files to register.)\n")
 
 	if err := os.WriteFile(filepath.Join(repoPath, "VASSAL.md"), []byte(sb.String()), 0o644); err != nil {

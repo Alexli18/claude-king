@@ -403,6 +403,8 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// Wire VassalClientPool into MCP server for dispatch_task/get_task_status/abort_task.
 	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
+	d.mcpSrv.SetTaskStore(d.store)
+	go d.mcpSrv.StartTaskReconciler(d.ctx, 10*time.Second)
 
 	// Populate vassal metadata for list_vassals routing hints.
 	vassalMeta := make(map[string]mcp.VassalMeta, len(d.config.Vassals))
@@ -526,12 +528,34 @@ func (d *Daemon) Attach(ctx context.Context) error {
 		}
 	}
 
+	// In attach mode, PTY sessions live in the daemon process. Use an RPC
+	// proxy so the MCP gateway can list/exec shell sessions via the daemon socket.
+	var ptyAdapter mcp.PTYManager
+	var proxyErr error
+	for attempts := 0; attempts < 3; attempts++ {
+		proxy, err := newRPCPTYProxy(d.sockPath)
+		if err == nil {
+			ptyAdapter = proxy
+			d.logger.Info("attach mode: using RPC proxy for shell vassals")
+			break
+		}
+		proxyErr = err
+		if attempts < 2 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	if ptyAdapter == nil {
+		d.logger.Warn("attach mode: cannot proxy shell sessions, shell vassals will not be visible", "err", proxyErr)
+		ptyAdapter = &ptyManagerAdapter{mgr: d.ptyMgr}
+	}
+
 	ledger := artifacts.NewLedgerWithSettings(d.store, d.kingdom.ID, d.config.Settings)
-	adapter := &ptyManagerAdapter{mgr: d.ptyMgr}
-	d.mcpSrv = mcp.NewServer(adapter, d.store, ledger, d.kingdom.ID, d.rootDir, d.logger.With("component", "mcp"))
+	d.mcpSrv = mcp.NewServer(ptyAdapter, d.store, ledger, d.kingdom.ID, d.rootDir, d.logger.With("component", "mcp"))
 	d.mcpSrv.SetApprovalManager(d.approvalMgr, d.config.Settings.SovereignApproval, d.config.Settings.SovereignApprovalTimeout)
 	d.mcpSrv.SetScanExecOutput(d.config.Settings.ScanExecOutput)
 	d.mcpSrv.SetVassalPool(&vassalPoolAdapter{pool: d.vassalPool})
+	d.mcpSrv.SetTaskStore(d.store)
+	go d.mcpSrv.StartTaskReconciler(d.ctx, 10*time.Second)
 
 	// Populate vassal metadata for list_vassals routing hints.
 	vassalMeta2 := make(map[string]mcp.VassalMeta, len(d.config.Vassals))
@@ -663,11 +687,14 @@ func (d *Daemon) startVassals() error {
 			})
 		}
 
-		// Start hang detector (T058).
-		if sess, ok := d.ptyMgr.GetSession(vc.Name); ok {
-			sess.StartHangDetector(5*time.Minute, func(name string) {
-				d.logger.Warn("VASSAL_FAILED", "name", name, "exit", "hung", "duration", "5m")
-			})
+		// Start hang detector (T058) — configurable per vassal.
+		if hangDur, hangEnabled := vc.HangTimeoutDuration(); hangEnabled {
+			if sess, ok := d.ptyMgr.GetSession(vc.Name); ok {
+				dur := hangDur
+				sess.StartHangDetector(dur, func(name string) {
+					d.logger.Warn("VASSAL_FAILED", "name", name, "exit", "hung", "duration", dur.String())
+				})
+			}
 		}
 
 		// VMP auto-registration (T040): load vassal.json from repo_path.
@@ -734,11 +761,12 @@ func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	kingDir := filepath.Join(d.rootDir, kingDirName)
 	sockPath := filepath.Join(kingDir, "vassals", v.Name+".sock")
 
-	if v.RepoPath != "" {
-		repoPath := v.RepoPath
-		if !filepath.IsAbs(repoPath) {
-			repoPath = filepath.Join(d.rootDir, repoPath)
-		}
+	// Resolve repo_path to absolute so king-vassal gets the correct working dir.
+	repoPath := v.RepoPath
+	if repoPath != "" && !filepath.IsAbs(repoPath) {
+		repoPath = filepath.Join(d.rootDir, repoPath)
+	}
+	if repoPath != "" {
 		d.injectAutoContracts(repoPath)
 	}
 
@@ -750,21 +778,43 @@ func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 	args := []string{
 		"--name", v.Name,
 		"--executor", v.TypeOrDefault(), // "claude" | "codex" | "gemini"
-		"--repo", v.RepoPath,
 		"--king-dir", kingDir,
 		"--king-sock", d.sockPath,
 		"--timeout", "10",
 	}
+	// Only pass --repo when repo_path is configured; otherwise king-vassal
+	// falls back to its cwd which we set below.
+	if repoPath != "" {
+		args = append(args, "--repo", repoPath)
+	}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+	// Kill any existing process for this vassal to prevent duplicates.
+	d.vassalProcsMu.Lock()
+	if existing, ok := d.vassalProcs[v.Name]; ok {
+		if existing.pgid > 0 {
+			_ = syscall.Kill(-existing.pgid, syscall.SIGTERM)
+		} else {
+			_ = existing.process.Signal(syscall.SIGTERM)
+		}
+		delete(d.vassalProcs, v.Name)
+	}
+	d.vassalProcsMu.Unlock()
+
 	// Disconnect any stale pool entry and remove stale socket so the poll loop
 	// below waits for the fresh one (handles daemon restarts and vassal crashes).
 	_ = d.vassalPool.Disconnect(v.Name)
 	_ = os.Remove(sockPath)
 
 	cmd := exec.Command(exe, args...)
-	cmd.Dir = d.rootDir
+	// Set cwd to the vassal's repo so os.Getwd() in king-vassal returns
+	// the correct project root (not the kingdom root).
+	if repoPath != "" {
+		cmd.Dir = repoPath
+	} else {
+		cmd.Dir = d.rootDir
+	}
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -852,6 +902,16 @@ func (d *Daemon) watchVassal(name string, cmd *exec.Cmd, cfg config.VassalConfig
 				}
 			}
 			// Delegation released — fall through to normal restart logic.
+		}
+
+		// Check if another process for this vassal is already running
+		// (e.g. started by a concurrent restart). Skip restart if so.
+		d.vassalProcsMu.RLock()
+		existing, hasExisting := d.vassalProcs[name]
+		d.vassalProcsMu.RUnlock()
+		if hasExisting && existing.process != cmd.Process {
+			d.logger.Info("vassal already restarted by another goroutine, exiting watcher", "name", name)
+			return
 		}
 
 		policy := cfg.RestartPolicy

@@ -127,6 +127,26 @@ CREATE INDEX IF NOT EXISTS idx_approvals_kingdom_status ON approval_requests(kin
 CREATE INDEX IF NOT EXISTS idx_approvals_kingdom_time ON approval_requests(kingdom_id, created_at DESC);
 `,
 	},
+	{
+		Version: 3,
+		SQL: `
+CREATE TABLE IF NOT EXISTS gateway_tasks (
+    task_id TEXT PRIMARY KEY,
+    vassal_name TEXT NOT NULL,
+    vassal_task_id TEXT,
+    task_description TEXT NOT NULL,
+    task_context TEXT,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued','accepted','running','done','failed','timeout','aborted')),
+    result TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_gateway_tasks_status ON gateway_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_gateway_tasks_vassal ON gateway_tasks(vassal_name);
+`,
+	},
 }
 
 // RunMigrations creates the schema_version tracking table and applies any

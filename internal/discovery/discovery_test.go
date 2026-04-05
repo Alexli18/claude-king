@@ -76,6 +76,11 @@ func TestFindKingdomSocket_CurrentDir(t *testing.T) {
 }
 
 func TestFindAllKingdomSockets_MultipleKingdoms(t *testing.T) {
+	// Skip if a live kingdom is registered in ~/.king/registry.json.
+	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, ".king", "registry.json")); err == nil {
+		t.Skip("skipping: live kingdom registry present, result count would differ")
+	}
 	// Two kingdoms: one in child dir, one in parent dir
 	parent := t.TempDir()
 	child := filepath.Join(parent, "child")
@@ -104,6 +109,13 @@ func TestFindAllKingdomSockets_MultipleKingdoms(t *testing.T) {
 }
 
 func TestFindAllKingdomSockets_None(t *testing.T) {
+	// Skip if a live kingdom is registered in ~/.king/registry.json — the
+	// function merges global registry entries so an isolated TempDir root
+	// cannot guarantee zero results when a real daemon is running.
+	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, ".king", "registry.json")); err == nil {
+		t.Skip("skipping: live kingdom registry present, cannot guarantee empty result")
+	}
 	root := t.TempDir()
 	kingdoms, err := discovery.FindAllKingdomSockets(root)
 	if err != discovery.ErrNoKingdom {

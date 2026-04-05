@@ -70,14 +70,30 @@ type VassalClient struct {
 	nextID   atomic.Int64
 }
 
+// DefaultVassalTimeout is the fallback read deadline when the caller's context
+// has no explicit deadline. Exported so MCP handlers can reference the value.
+const DefaultVassalTimeout = 30 * time.Second
+
+// readResult carries the outcome of a blocking ReadBytes call from a goroutine.
+type readResult struct {
+	line []byte
+	err  error
+}
+
 // CallTool sends a tools/call JSON-RPC request to the vassal MCP server and
 // returns the text content of the first result item.
 //
 // The mutex is held for the entire request/response cycle to serialise
 // concurrent callers and prevent interleaved writes/reads on the connection.
+// The blocking read is wrapped in a goroutine so the call can be cancelled
+// via context — this prevents a stuck vassal from blocking the gateway.
 func (vc *VassalClient) CallTool(ctx context.Context, toolName string, args map[string]any) (string, error) {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("vassal_client context: %w", err)
+	}
 
 	id := vc.nextID.Add(1)
 
@@ -96,26 +112,38 @@ func (vc *VassalClient) CallTool(ctx context.Context, toolName string, args map[
 		return "", fmt.Errorf("vassal_client write request: %w", err)
 	}
 
-	// Forward context deadline to the connection so ReadBytes doesn't block
-	// indefinitely if the context is cancelled or times out.
-	// If context has no explicit deadline, use a 60s default to prevent
-	// indefinite hangs when a vassal process is stuck.
-	const defaultVassalTimeout = 60 * time.Second
+	// Set a read deadline on the socket so ReadBytes doesn't block forever
+	// even if the context is not cancelled. Use the context deadline if
+	// available, otherwise fall back to DefaultVassalTimeout.
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = vc.conn.SetReadDeadline(deadline)
 	} else {
-		_ = vc.conn.SetReadDeadline(time.Now().Add(defaultVassalTimeout))
+		_ = vc.conn.SetReadDeadline(time.Now().Add(DefaultVassalTimeout))
 	}
 	defer vc.conn.SetReadDeadline(time.Time{}) //nolint:errcheck
 
-	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("vassal_client context: %w", err)
-	}
+	// Read in a goroutine so we can select on context cancellation.
+	ch := make(chan readResult, 1)
+	go func() {
+		line, err := vc.reader.ReadBytes('\n')
+		ch <- readResult{line, err}
+	}()
 
-	// Read the response line.
-	line, err := vc.reader.ReadBytes('\n')
-	if err != nil {
-		return "", fmt.Errorf("vassal_client read response: %w", err)
+	var line []byte
+	select {
+	case <-ctx.Done():
+		// Force-unblock the reader by setting a past deadline.
+		_ = vc.conn.SetReadDeadline(time.Now())
+		<-ch // drain goroutine
+		return "", fmt.Errorf("vassal %q: %w", vc.name, ctx.Err())
+	case res := <-ch:
+		if res.err != nil {
+			if netErr, ok := res.err.(net.Error); ok && netErr.Timeout() {
+				return "", fmt.Errorf("vassal %q timed out after %s", vc.name, DefaultVassalTimeout)
+			}
+			return "", fmt.Errorf("vassal_client read response: %w", res.err)
+		}
+		line = res.line
 	}
 
 	var resp mcpResponse

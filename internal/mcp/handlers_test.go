@@ -722,10 +722,12 @@ func TestHandleDispatchTask_NoPool(t *testing.T) {
 
 func TestHandleDispatchTask_Success(t *testing.T) {
 	caller := &fakeVassalCaller{result: `{"task_id":"t-001","status":"dispatched"}`}
-	srv := newTestServer(t, &fakePTYManager{}, newTestStore(t), &fakeArtifactLedger{})
+	ts := newTestStore(t)
+	srv := newTestServer(t, &fakePTYManager{}, ts, &fakeArtifactLedger{})
 	srv.vassalPool = &fakeVassalPool{
 		vassals: map[string]*fakeVassalCaller{"worker": caller},
 	}
+	srv.SetTaskStore(ts)
 
 	result, err := srv.handleDispatchTask(context.Background(), makeRequest(map[string]any{
 		"vassal": "worker",
@@ -738,8 +740,8 @@ func TestHandleDispatchTask_Success(t *testing.T) {
 		t.Fatalf("expected success, got: %v", extractText(t, result))
 	}
 	text := extractText(t, result)
-	if !strings.Contains(text, "t-001") {
-		t.Errorf("expected task_id in response, got: %s", text)
+	if !strings.Contains(text, "gt-") {
+		t.Errorf("expected gt- task_id in response, got: %s", text)
 	}
 }
 

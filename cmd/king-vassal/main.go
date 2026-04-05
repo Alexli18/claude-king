@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/alexli18/claude-king/internal/config"
 	"github.com/alexli18/claude-king/internal/daemon"
 	"github.com/alexli18/claude-king/internal/discovery"
 	"github.com/alexli18/claude-king/internal/fingerprint"
@@ -34,12 +35,17 @@ func main() {
 	}
 
 	// Zero-config: fill missing flags from environment.
+	repoFlagExplicit := *repoPath != ""
+	nameFlagExplicit := *name != ""
 	if *repoPath == "" {
 		*repoPath = cwd
 	}
 	if *name == "" {
 		*name = filepath.Base(*repoPath)
 	}
+
+	// Discover kingdom socket and root directory.
+	var kingdomRootDir string
 	if *kingSocket == "" {
 		kingdoms, discErr := discovery.FindAllKingdomSockets(cwd)
 		if discErr != nil {
@@ -49,6 +55,7 @@ func main() {
 		switch len(kingdoms) {
 		case 1:
 			*kingSocket = kingdoms[0].SocketPath
+			kingdomRootDir = kingdoms[0].RootDir
 		default:
 			if *stdio {
 				fmt.Fprintf(os.Stderr, "error: multiple kingdoms found, use --king-sock to specify one\n")
@@ -74,7 +81,85 @@ func main() {
 				os.Exit(1)
 			}
 			*kingSocket = kingdoms[choice-1].SocketPath
+			kingdomRootDir = kingdoms[choice-1].RootDir
 		}
+	} else {
+		// Derive kingdom root from explicit --king-sock path:
+		// socket is at <root>/.king/king-<hash>.sock
+		kingdomRootDir = filepath.Dir(filepath.Dir(*kingSocket))
+	}
+
+	// Auto-resolve vassal identity and repo_path from kingdom.yml.
+	//
+	// When king-vassal is launched via .mcp.json (stdio mode), --name and
+	// --repo are usually absent. We resolve the vassal config by:
+	//   1. Exact --name match (when --name was explicitly provided)
+	//   2. Reverse lookup: match cwd against each vassal's resolved repo_path
+	//   3. Fallback: match directory basename against vassal names
+	//
+	// Once matched, both *name and *repoPath are updated from the config.
+	if kingdomRootDir != "" {
+		if cfg, err := config.LoadOrCreateConfig(kingdomRootDir); err == nil {
+			var matched *config.VassalConfig
+
+			// Strategy 1: exact --name match.
+			if nameFlagExplicit {
+				for i, vc := range cfg.Vassals {
+					if vc.Name == *name {
+						matched = &cfg.Vassals[i]
+						break
+					}
+				}
+			}
+
+			// Strategy 2: reverse lookup by cwd matching resolved repo_path.
+			if matched == nil {
+				cleanCwd := filepath.Clean(cwd)
+				for i, vc := range cfg.Vassals {
+					if vc.RepoPath == "" {
+						continue
+					}
+					rp := vc.RepoPath
+					if !filepath.IsAbs(rp) {
+						rp = filepath.Join(kingdomRootDir, rp)
+					}
+					if filepath.Clean(rp) == cleanCwd {
+						matched = &cfg.Vassals[i]
+						break
+					}
+				}
+			}
+
+			// Strategy 3: basename of cwd matches vassal name.
+			if matched == nil {
+				base := filepath.Base(cwd)
+				for i, vc := range cfg.Vassals {
+					if vc.Name == base {
+						matched = &cfg.Vassals[i]
+						break
+					}
+				}
+			}
+
+			// Apply matched config.
+			if matched != nil {
+				if !nameFlagExplicit {
+					*name = matched.Name
+				}
+				if !repoFlagExplicit && matched.RepoPath != "" {
+					rp := matched.RepoPath
+					if !filepath.IsAbs(rp) {
+						rp = filepath.Join(kingdomRootDir, rp)
+					}
+					*repoPath = rp
+				}
+			}
+		}
+	}
+
+	// Update king-dir to point to the discovered kingdom's .king directory.
+	if *kingDir == ".king" && kingdomRootDir != "" {
+		*kingDir = filepath.Join(kingdomRootDir, ".king")
 	}
 
 	// Fingerprint the project and log the type (used by daemon for Auto-Integrity).

@@ -68,6 +68,15 @@ type ApprovalManager interface {
 	Cancel(requestID string) bool
 }
 
+// TaskStore provides gateway task CRUD methods, defined here to avoid
+// import cycles between mcp and store packages.
+type TaskStore interface {
+	CreateGatewayTask(t store.GatewayTask) error
+	GetGatewayTask(taskID string) (*store.GatewayTask, error)
+	UpdateGatewayTask(taskID, status, vassalTaskID, result, errorMsg string) error
+	ListActiveGatewayTasks() ([]store.GatewayTask, error)
+}
+
 // VassalCaller is the interface for calling a tool on a specific vassal.
 // It is implemented by *daemon.VassalClient and defined here to avoid
 // an import cycle between mcp and daemon packages.
@@ -98,6 +107,7 @@ type Server struct {
 	ledger      ArtifactLedger
 	approvalMgr ApprovalManager // may be nil when sovereign_approval is disabled
 	vassalPool  VassalPool      // may be nil before SetVassalPool is called
+	taskStore   TaskStore       // may be nil before SetTaskStore is called
 	kingdomID   string
 	rootDir     string
 	logger      *slog.Logger
@@ -167,6 +177,11 @@ func (s *Server) SetScanExecOutput(enabled bool) {
 // Call this after creation when vassal pool is available.
 func (s *Server) SetVassalPool(pool VassalPool) {
 	s.vassalPool = pool
+}
+
+// SetTaskStore wires a TaskStore into the server for gateway task caching.
+func (s *Server) SetTaskStore(ts TaskStore) {
+	s.taskStore = ts
 }
 
 // SetVassalMeta stores config-derived metadata for vassals, used by list_vassals.

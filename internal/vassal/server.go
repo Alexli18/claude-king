@@ -278,7 +278,7 @@ func (s *VassalServer) runTask(t *Task) {
 	}
 
 	// Write VASSAL.md — Claude Code reads this as context.
-	if err := WriteVassalMD(s.repoPath, s.name, t, nil); err != nil {
+	if err := WriteVassalMD(s.repoPath, s.name, s.kingDir, t, nil); err != nil {
 		s.logger.Warn("could not write VASSAL.md", "err", err)
 	}
 

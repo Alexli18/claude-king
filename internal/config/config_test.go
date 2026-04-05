@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexli18/claude-king/internal/config"
 )
@@ -502,5 +503,102 @@ func TestLoadConfig_ValidYAML(t *testing.T) {
 	}
 	if !strings.Contains(cfg.Vassals[0].Name, "shell") {
 		t.Errorf("expected vassal named 'shell', got %q", cfg.Vassals[0].Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HangTimeoutDuration tests
+// ---------------------------------------------------------------------------
+
+func TestHangTimeoutDuration_ExplicitZero_Disabled(t *testing.T) {
+	v := config.VassalConfig{Name: "sh", Command: "bash", HangTimeout: "0"}
+	dur, enabled := v.HangTimeoutDuration()
+	if enabled {
+		t.Error("expected disabled for HangTimeout=0")
+	}
+	if dur != 0 {
+		t.Errorf("expected 0, got %v", dur)
+	}
+}
+
+func TestHangTimeoutDuration_ExplicitValue(t *testing.T) {
+	v := config.VassalConfig{Name: "api", Command: "./api", HangTimeout: "10m"}
+	dur, enabled := v.HangTimeoutDuration()
+	if !enabled {
+		t.Error("expected enabled")
+	}
+	if dur != 10*time.Minute {
+		t.Errorf("expected 10m, got %v", dur)
+	}
+}
+
+func TestHangTimeoutDuration_ShellNoCommand_Disabled(t *testing.T) {
+	v := config.VassalConfig{Name: "sh", Type: "shell"}
+	_, enabled := v.HangTimeoutDuration()
+	if enabled {
+		t.Error("expected disabled for interactive shell (no command)")
+	}
+}
+
+func TestHangTimeoutDuration_SerialNoCommand_Disabled(t *testing.T) {
+	v := config.VassalConfig{Name: "gps", Type: "serial"}
+	_, enabled := v.HangTimeoutDuration()
+	if enabled {
+		t.Error("expected disabled for serial vassal without command")
+	}
+}
+
+func TestHangTimeoutDuration_ShellWithCommand_Disabled(t *testing.T) {
+	v := config.VassalConfig{Name: "build", Command: "make watch"}
+	_, enabled := v.HangTimeoutDuration()
+	if enabled {
+		t.Error("expected disabled for shell with command (interactive by nature)")
+	}
+}
+
+func TestHangTimeoutDuration_Claude_Default5m(t *testing.T) {
+	v := config.VassalConfig{Name: "ai", Type: "claude"}
+	dur, enabled := v.HangTimeoutDuration()
+	if !enabled {
+		t.Error("expected enabled for claude vassal")
+	}
+	if dur != 5*time.Minute {
+		t.Errorf("expected 5m, got %v", dur)
+	}
+}
+
+func TestValidate_HangTimeout_InvalidDuration_Fails(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "k",
+		Vassals: []config.VassalConfig{
+			{Name: "ai", Type: "claude", HangTimeout: "notaduration"},
+		},
+	}
+	if err := config.Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid hang_timeout")
+	}
+}
+
+func TestValidate_HangTimeout_ValidDuration_OK(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "k",
+		Vassals: []config.VassalConfig{
+			{Name: "sh", Command: "bash", HangTimeout: "10m"},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_HangTimeout_Zero_OK(t *testing.T) {
+	cfg := &config.KingdomConfig{
+		Name: "k",
+		Vassals: []config.VassalConfig{
+			{Name: "sh", Command: "bash", HangTimeout: "0"},
+		},
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -826,6 +826,103 @@ func (s *Store) ExpirePendingApprovals(kingdomID string) error {
 }
 
 // ---------------------------------------------------------------------------
+// GatewayTask operations
+// ---------------------------------------------------------------------------
+
+// GatewayTask represents a task dispatched through the gateway to a vassal.
+type GatewayTask struct {
+	TaskID          string
+	VassalName      string
+	VassalTaskID    string
+	TaskDescription string
+	TaskContext     string // JSON
+	Status          string
+	Result          string
+	ErrorMessage    string
+	CreatedAt       string
+	UpdatedAt       string
+}
+
+// CreateGatewayTask inserts a new gateway task record.
+func (s *Store) CreateGatewayTask(t GatewayTask) error {
+	_, err := s.db.Exec(`
+		INSERT INTO gateway_tasks (task_id, vassal_name, vassal_task_id, task_description, task_context, status, result, error_message, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?,''), datetime('now')), datetime('now'))`,
+		t.TaskID, t.VassalName, nullableString(t.VassalTaskID),
+		t.TaskDescription, nullableString(t.TaskContext), t.Status,
+		nullableString(t.Result), nullableString(t.ErrorMessage), t.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert gateway task: %w", err)
+	}
+	return nil
+}
+
+// GetGatewayTask retrieves a gateway task by its primary key.
+func (s *Store) GetGatewayTask(taskID string) (*GatewayTask, error) {
+	row := s.db.QueryRow(`
+		SELECT task_id, vassal_name, vassal_task_id, task_description, task_context,
+		       status, result, error_message, created_at, updated_at
+		FROM gateway_tasks WHERE task_id = ?`, taskID)
+	return scanGatewayTask(row)
+}
+
+// UpdateGatewayTask updates mutable fields of a gateway task.
+func (s *Store) UpdateGatewayTask(taskID, status, vassalTaskID, result, errorMsg string) error {
+	res, err := s.db.Exec(`
+		UPDATE gateway_tasks
+		SET status = ?, vassal_task_id = COALESCE(NULLIF(?,''), vassal_task_id),
+		    result = COALESCE(NULLIF(?,''), result),
+		    error_message = COALESCE(NULLIF(?,''), error_message),
+		    updated_at = datetime('now')
+		WHERE task_id = ?`,
+		status, vassalTaskID, result, errorMsg, taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("update gateway task: %w", err)
+	}
+	return ensureRowAffected(res, "gateway_task", taskID)
+}
+
+// ListActiveGatewayTasks returns all gateway tasks with non-terminal status.
+func (s *Store) ListActiveGatewayTasks() ([]GatewayTask, error) {
+	rows, err := s.db.Query(`
+		SELECT task_id, vassal_name, vassal_task_id, task_description, task_context,
+		       status, result, error_message, created_at, updated_at
+		FROM gateway_tasks
+		WHERE status NOT IN ('done','failed','timeout','aborted')
+		ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("list active gateway tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []GatewayTask
+	for rows.Next() {
+		t, err := scanGatewayTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, *t)
+	}
+	return tasks, rows.Err()
+}
+
+// DeleteOldGatewayTasks removes terminal gateway tasks older than retentionDays.
+func (s *Store) DeleteOldGatewayTasks(retentionDays int) error {
+	_, err := s.db.Exec(`
+		DELETE FROM gateway_tasks
+		WHERE status IN ('done','failed','timeout','aborted')
+		  AND updated_at < datetime('now', ?)`,
+		fmt.Sprintf("-%d days", retentionDays),
+	)
+	if err != nil {
+		return fmt.Errorf("delete old gateway tasks: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Scanner helpers
 // ---------------------------------------------------------------------------
 
@@ -1019,6 +1116,40 @@ func scanApprovalRequestFromScanner(s scanner) (*ApprovalRequest, error) {
 
 func scanApprovalRequestRow(rows *sql.Rows) (*ApprovalRequest, error) {
 	return scanApprovalRequestFromScanner(rows)
+}
+
+func scanGatewayTask(s scanner) (*GatewayTask, error) {
+	t, err := scanGatewayTaskFromScanner(s)
+	if err != nil && errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return t, err
+}
+
+func scanGatewayTaskFromScanner(s scanner) (*GatewayTask, error) {
+	var t GatewayTask
+	var vassalTaskID, taskContext, result, errorMessage sql.NullString
+	if err := s.Scan(&t.TaskID, &t.VassalName, &vassalTaskID, &t.TaskDescription,
+		&taskContext, &t.Status, &result, &errorMessage, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return nil, fmt.Errorf("scan gateway task: %w", err)
+	}
+	if vassalTaskID.Valid {
+		t.VassalTaskID = vassalTaskID.String
+	}
+	if taskContext.Valid {
+		t.TaskContext = taskContext.String
+	}
+	if result.Valid {
+		t.Result = result.String
+	}
+	if errorMessage.Valid {
+		t.ErrorMessage = errorMessage.String
+	}
+	return &t, nil
+}
+
+func scanGatewayTaskRow(rows *sql.Rows) (*GatewayTask, error) {
+	return scanGatewayTaskFromScanner(rows)
 }
 
 // ---------------------------------------------------------------------------

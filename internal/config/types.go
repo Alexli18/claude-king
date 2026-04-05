@@ -1,6 +1,9 @@
 package config
 
-import "regexp"
+import (
+	"regexp"
+	"time"
+)
 
 // KingdomConfig represents the top-level kingdom configuration from .king/kingdom.yml
 type KingdomConfig struct {
@@ -32,6 +35,11 @@ type VassalConfig struct {
 	SerialPort     string `yaml:"serial_port,omitempty"`
 	BaudRate       int    `yaml:"baud_rate,omitempty"`
 	SerialProtocol string `yaml:"serial_protocol,omitempty"` // "esp32" | "nmea" | "at" | "" (auto)
+
+	// HangTimeout overrides the default hang detection timeout.
+	// Use "0" to disable hang detection (e.g. interactive shells).
+	// Examples: "5m", "10m", "0"
+	HangTimeout string `yaml:"hang_timeout,omitempty"`
 
 	// Guards — runtime health checks for this vassal
 	Guards []GuardConfig `yaml:"guards,omitempty"`
@@ -84,6 +92,36 @@ func (v VassalConfig) BaudRateOrDefault() int {
 		return 115200
 	}
 	return v.BaudRate
+}
+
+// HangTimeoutDuration returns the hang detection timeout for this vassal and
+// whether hang detection is enabled.
+//
+// Rules:
+//   - "0" → disabled
+//   - Non-empty valid duration → that duration, enabled
+//   - Empty + interactive (shell/serial with no command) → disabled
+//   - Empty + has command → 5m default, enabled
+func (v VassalConfig) HangTimeoutDuration() (time.Duration, bool) {
+	if v.HangTimeout == "0" {
+		return 0, false
+	}
+	if v.HangTimeout != "" {
+		d, err := time.ParseDuration(v.HangTimeout)
+		if err != nil {
+			// Invalid value — fall through to defaults.
+			return 5 * time.Minute, true
+		}
+		return d, true
+	}
+	// Empty: auto-detect based on vassal type.
+	// Shell and serial vassals are interactive by nature — disable hang detection
+	// unless explicitly configured via hang_timeout.
+	t := v.TypeOrDefault()
+	if t == "shell" || t == "serial" {
+		return 0, false
+	}
+	return 5 * time.Minute, true
 }
 
 // PatternConfig represents an event detection pattern

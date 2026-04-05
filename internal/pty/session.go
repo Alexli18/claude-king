@@ -432,6 +432,9 @@ func (s *Session) StartHangDetector(timeout time.Duration, onHang func(name stri
 		ticker := time.NewTicker(timeout / 2)
 		defer ticker.Stop()
 
+		fired := false
+		lastSeen := time.Time{}
+
 		for {
 			select {
 			case <-ticker.C:
@@ -439,14 +442,21 @@ func (s *Session) StartHangDetector(timeout time.Duration, onHang func(name stri
 				last := s.lastOutput
 				s.lastOutputMu.Unlock()
 
-				if time.Since(last) >= timeout {
+				// Reset fired flag when new output arrives.
+				if last != lastSeen {
+					lastSeen = last
+					fired = false
+				}
+
+				if !fired && time.Since(last) >= timeout {
 					s.mu.RLock()
 					status := s.Status
 					s.mu.RUnlock()
 
-					// Only fire for running sessions.
+					// Only fire once for running sessions.
 					if status == StatusRunning {
 						onHang(s.Name)
+						fired = true
 					}
 				}
 			case <-s.done:

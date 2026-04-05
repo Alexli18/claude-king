@@ -532,6 +532,7 @@ func cmdApproveReject(approve bool) {
 
 func cmdReportDone() {
 	var taskID string
+	var kingDirFlag string
 	var artifacts []string
 
 	args := os.Args[2:]
@@ -544,6 +545,13 @@ func cmdReportDone() {
 			}
 			i++
 			taskID = args[i]
+		case "--king-dir":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --king-dir requires a value")
+				os.Exit(1)
+			}
+			i++
+			kingDirFlag = args[i]
 		case "--artifacts":
 			// Collect all remaining args as artifacts
 			artifacts = args[i+1:]
@@ -559,12 +567,21 @@ func cmdReportDone() {
 		os.Exit(1)
 	}
 
-	rootDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+	var kingDir string
+	var err error
+	if kingDirFlag != "" {
+		kingDir, err = filepath.Abs(kingDirFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		kingDir, err = findKingDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	}
-	kingDir := filepath.Join(rootDir, ".king")
 
 	t, err := vassal.LoadTask(kingDir, taskID)
 	if err != nil {
@@ -626,4 +643,38 @@ func cmdAuditTrace(client *daemon.Client, traceID string) {
 	if trace.Output != "" {
 		fmt.Printf("\nOutput:\n%s\n", trace.Output)
 	}
+}
+
+// findKingDir locates the .king directory by checking KING_DIR env var first,
+// then walking up from cwd until it finds a directory containing .king/.
+func findKingDir() (string, error) {
+	// Respect explicit env var.
+	if dir := os.Getenv("KING_DIR"); dir != "" {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(abs, ".king"), nil
+	}
+
+	// Walk up from cwd.
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		candidate := filepath.Join(dir, ".king")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	// Fallback to cwd/.king for backwards compatibility.
+	cwd, _ := os.Getwd()
+	return filepath.Join(cwd, ".king"), nil
 }
