@@ -815,13 +815,24 @@ func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 
 	// Kill any orphaned vassal process from a previous daemon run that was
 	// never cleaned up (e.g. parent killed via SIGKILL, leaving children alive).
+	// PID file format: "pid:pgid" — both values stored so we never rely on a
+	// potentially-reused PID to look up the PGID at kill time.
 	vassalPIDPath := filepath.Join(kingDir, "vassals", v.Name+".pid")
 	if data, err := os.ReadFile(vassalPIDPath); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 0 {
-			if pgid, err := syscall.Getpgid(pid); err == nil && pgid > 0 {
-				_ = syscall.Kill(-pgid, syscall.SIGTERM)
-			} else if proc, err := os.FindProcess(pid); err == nil {
-				_ = proc.Signal(syscall.SIGTERM)
+		parts := strings.SplitN(strings.TrimSpace(string(data)), ":", 2)
+		if len(parts) >= 1 {
+			pid, pidErr := strconv.Atoi(parts[0])
+			pgid := 0
+			if len(parts) == 2 {
+				pgid, _ = strconv.Atoi(parts[1])
+			}
+			if pidErr == nil && pid > 0 {
+				// Use SIGKILL directly — orphaned processes need no graceful shutdown.
+				if pgid > 0 {
+					_ = syscall.Kill(-pgid, syscall.SIGKILL)
+				} else if proc, err := os.FindProcess(pid); err == nil {
+					_ = proc.Kill()
+				}
 			}
 		}
 		_ = os.Remove(vassalPIDPath)
@@ -870,9 +881,13 @@ func (d *Daemon) launchAIVassal(v config.VassalConfig) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("connect to king-vassal %q: %w", v.Name, err)
 	}
 
-	// Write per-vassal PID file so the next launchAIVassal call can kill
+	// Write per-vassal PID file ("pid:pgid") so the next launchAIVassal can kill
 	// this process even if the parent daemon was killed without cleanup.
-	_ = os.WriteFile(vassalPIDPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+	// Storing both pid and pgid avoids relying on a potentially-reused PID
+	// to look up the PGID at kill time.
+	newPgid, _ := syscall.Getpgid(cmd.Process.Pid)
+	_ = os.WriteFile(vassalPIDPath,
+		[]byte(fmt.Sprintf("%d:%d", cmd.Process.Pid, newPgid)), 0o644)
 
 	return cmd, nil
 }
@@ -1090,10 +1105,6 @@ func (d *Daemon) Stop() error {
 		} else {
 			_ = vp.process.Signal(syscall.SIGTERM)
 		}
-		// Remove per-vassal PID file so next daemon start won't try to kill
-		// a process we already shut down gracefully.
-		kingDir := filepath.Join(d.rootDir, kingDirName)
-		_ = os.Remove(filepath.Join(kingDir, "vassals", vassalNames[i]+".pid"))
 	}
 	// Wait up to 3s for all vassals to exit, then SIGKILL survivors.
 	if len(vassalSnapshot) > 0 {
@@ -1124,6 +1135,18 @@ func (d *Daemon) Stop() error {
 
 	// Wait for connection handlers to finish.
 	d.wg.Wait()
+
+	// Remove per-vassal PID files now that processes are confirmed dead
+	// (wg.Wait() returned, meaning all watchVassal goroutines exited after
+	// cmd.Wait()). Deleting these only AFTER confirmation prevents a race
+	// where Stop() is killed before wg.Wait(), leaving processes alive but
+	// PID files gone — causing the next daemon start to not kill orphans.
+	if len(vassalNames) > 0 {
+		kingDir := filepath.Join(d.rootDir, kingDirName)
+		for _, name := range vassalNames {
+			_ = os.Remove(filepath.Join(kingDir, "vassals", name+".pid"))
+		}
+	}
 
 	// Step 5: Remove socket and PID files — only in Start mode.
 	// In Attach mode these files belong to the daemon process; removing
